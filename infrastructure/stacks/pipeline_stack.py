@@ -44,24 +44,18 @@ class PipelineStack(Stack):
         super().__init__(scope, construct_id, **kwargs)
 
         # ---------------------------------------------------------------
-        # Secrets Manager — API keys (created empty, filled manually)
+        # Secrets Manager — reference existing secrets (created by bootstrap)
         # ---------------------------------------------------------------
-        reddit_secret = secretsmanager.Secret(
-            self, "RedditSecret",
-            secret_name="investing-assistant/reddit",
-            description="Reddit API credentials for PRAW",
+        reddit_secret = secretsmanager.Secret.from_secret_name_v2(
+            self, "RedditSecret", "investing-assistant/reddit",
         )
 
-        x_secret = secretsmanager.Secret(
-            self, "XApiSecret",
-            secret_name="investing-assistant/x-api",
-            description="X/Twitter API Bearer Token",
+        x_secret = secretsmanager.Secret.from_secret_name_v2(
+            self, "XApiSecret", "investing-assistant/x-api",
         )
 
-        llm_secret = secretsmanager.Secret(
-            self, "LLMKeysSecret",
-            secret_name="investing-assistant/llm-keys",
-            description="LLM API keys (Gemini, OpenAI, Anthropic)",
+        llm_secret = secretsmanager.Secret.from_secret_name_v2(
+            self, "LLMKeysSecret", "investing-assistant/llm-keys",
         )
 
         # ---------------------------------------------------------------

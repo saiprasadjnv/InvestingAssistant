@@ -1,0 +1,104 @@
+"""
+API Stack — API Gateway HTTP API + Lambda backend.
+"""
+
+from pathlib import Path
+from constructs import Construct
+import aws_cdk as cdk
+from aws_cdk import (
+    Stack,
+    Duration,
+    aws_lambda as _lambda,
+    aws_apigatewayv2 as apigwv2,
+    aws_apigatewayv2_integrations as apigwv2_integrations,
+    aws_s3 as s3,
+    aws_dynamodb as dynamodb,
+)
+
+SRC_DIR = str(Path(__file__).resolve().parent.parent.parent / "src")
+
+
+class ApiStack(Stack):
+    """API Gateway HTTP API backed by a FastAPI Lambda."""
+
+    def __init__(
+        self,
+        scope: Construct,
+        construct_id: str,
+        *,
+        analysis_table: dynamodb.ITable,
+        processed_docs_table: dynamodb.ITable,
+        job_runs_table: dynamodb.ITable,
+        raw_bucket: s3.IBucket,
+        **kwargs,
+    ) -> None:
+        super().__init__(scope, construct_id, **kwargs)
+
+        # ---------------------------------------------------------------
+        # API Lambda
+        # ---------------------------------------------------------------
+        api_lambda = _lambda.Function(
+            self,
+            "ApiFunction",
+            function_name="InvestingAssistant-Api",
+            runtime=_lambda.Runtime.PYTHON_3_12,
+            code=_lambda.Code.from_asset(f"{SRC_DIR}/api"),
+            handler="handler.handler",
+            memory_size=256,
+            timeout=Duration.seconds(30),
+            environment={
+                "INVESTING_ASSISTANT_ENV": "dev",
+                "S3_RAW_BUCKET": raw_bucket.bucket_name,
+                "ANALYSIS_TABLE": analysis_table.table_name,
+                "PROCESSED_DOCS_TABLE": processed_docs_table.table_name,
+                "JOB_RUNS_TABLE": job_runs_table.table_name,
+            },
+            tracing=_lambda.Tracing.ACTIVE,
+        )
+
+        # Grant read permissions
+        analysis_table.grant_read_data(api_lambda)
+        processed_docs_table.grant_read_data(api_lambda)
+        job_runs_table.grant_read_data(api_lambda)
+        raw_bucket.grant_read(api_lambda)
+
+        # ---------------------------------------------------------------
+        # API Gateway HTTP API
+        # ---------------------------------------------------------------
+        http_api = apigwv2.HttpApi(
+            self,
+            "HttpApi",
+            api_name="InvestingAssistant-HttpApi",
+            cors_preflight=apigwv2.CorsPreflightOptions(
+                allow_origins=["*"],
+                allow_methods=[apigwv2.CorsHttpMethod.ANY],
+                allow_headers=["*"],
+                max_age=Duration.hours(1),
+            ),
+        )
+
+        # Default integration — all routes go to the FastAPI Lambda
+        integration = apigwv2_integrations.HttpLambdaIntegration(
+            "ApiIntegration", handler=api_lambda,
+        )
+
+        http_api.add_routes(
+            path="/{proxy+}",
+            methods=[apigwv2.HttpMethod.ANY],
+            integration=integration,
+        )
+
+        # Also handle root path
+        http_api.add_routes(
+            path="/",
+            methods=[apigwv2.HttpMethod.GET],
+            integration=integration,
+        )
+
+        # ---------------------------------------------------------------
+        # Outputs
+        # ---------------------------------------------------------------
+        self.api_url = http_api.url or ""
+
+        cdk.CfnOutput(self, "ApiUrl", value=self.api_url)
+        cdk.CfnOutput(self, "ApiLambdaArn", value=api_lambda.function_arn)

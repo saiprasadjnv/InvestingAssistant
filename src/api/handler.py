@@ -4,10 +4,11 @@ Main API handler — FastAPI application served by Mangum on AWS Lambda.
 
 from __future__ import annotations
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from mangum import Mangum
 
+from .auth import auth_router, get_current_user
 from .routes import analysis, companies, dashboard, job_runs
 
 app = FastAPI(
@@ -25,11 +26,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Register route modules
-app.include_router(companies.router, prefix="/api", tags=["Companies"])
-app.include_router(analysis.router, prefix="/api", tags=["Analysis"])
-app.include_router(dashboard.router, prefix="/api", tags=["Dashboard"])
-app.include_router(job_runs.router, prefix="/api", tags=["Job Runs"])
+# Auth endpoints — no authentication required
+app.include_router(auth_router, prefix="/api", tags=["Auth"])
+
+# Protected route modules — require valid JWT
+app.include_router(companies.router, prefix="/api", tags=["Companies"], dependencies=[Depends(get_current_user)])
+app.include_router(analysis.router, prefix="/api", tags=["Analysis"], dependencies=[Depends(get_current_user)])
+app.include_router(dashboard.router, prefix="/api", tags=["Dashboard"], dependencies=[Depends(get_current_user)])
+app.include_router(job_runs.router, prefix="/api", tags=["Job Runs"], dependencies=[Depends(get_current_user)])
 
 
 @app.get("/", tags=["Health"])

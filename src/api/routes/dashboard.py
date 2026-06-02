@@ -7,8 +7,9 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
+from src.api.auth import get_current_user
 from src.shared.config import load_companies
 from src.shared.storage import create_dynamo_storage
 
@@ -25,10 +26,39 @@ def _get_dynamo():
     return _dynamo
 
 
+def _get_username(user: dict) -> str:
+    """Extract the username (sub claim) from the JWT payload."""
+    return user.get("sub", "anonymous")
+
+
+def _get_user_companies_list(username: str) -> list[dict]:
+    """Get companies for a user, seeding from defaults if first time."""
+    dynamo = _get_dynamo()
+    companies = dynamo.get_user_companies(username)
+    if companies is None:
+        # First-time user — seed from default config
+        defaults = load_companies()
+        companies = [
+            {
+                "name": c.name,
+                "ticker": c.ticker,
+                "sector": c.sector,
+                "cik": c.cik,
+                "investor_page_url": c.investor_page_url,
+                "news_page_url": c.news_page_url,
+            }
+            for c in defaults
+        ]
+        dynamo.put_user_companies(username, companies)
+        logger.info("Seeded %d default companies for new user %s", len(companies), username)
+    return companies
+
+
 @router.get("/dashboard/summary")
-def get_dashboard_summary() -> dict[str, Any]:
+def get_dashboard_summary(user: dict = Depends(get_current_user)) -> dict[str, Any]:
     """Aggregated dashboard data: company count, sentiment distribution, averages."""
-    companies = load_companies()
+    username = _get_username(user)
+    companies = _get_user_companies_list(username)
     dynamo = _get_dynamo()
 
     total_analyses = 0
@@ -37,8 +67,11 @@ def get_dashboard_summary() -> dict[str, Any]:
     company_summaries: list[dict] = []
 
     for company in companies:
+        ticker = company["ticker"]
+        name = company["name"]
+        sector = company.get("sector", "Unknown")
         try:
-            analyses = dynamo.get_analyses_for_ticker(company.ticker, limit=20)
+            analyses = dynamo.get_analyses_for_ticker(ticker, limit=20)
             total_analyses += len(analyses)
 
             for a in analyses:
@@ -50,19 +83,19 @@ def get_dashboard_summary() -> dict[str, Any]:
 
             latest = analyses[0] if analyses else {}
             company_summaries.append({
-                "ticker": company.ticker,
-                "name": company.name,
-                "sector": company.sector,
+                "ticker": ticker,
+                "name": name,
+                "sector": sector,
                 "analysis_count": len(analyses),
                 "latest_sentiment": latest.get("sentiment"),
                 "latest_impact_score": latest.get("impact_score"),
             })
         except Exception as exc:
-            logger.error("Failed to get analyses for %s: %s", company.ticker, exc)
+            logger.error("Failed to get analyses for %s: %s", ticker, exc)
             company_summaries.append({
-                "ticker": company.ticker,
-                "name": company.name,
-                "sector": company.sector,
+                "ticker": ticker,
+                "name": name,
+                "sector": sector,
                 "analysis_count": 0,
                 "latest_sentiment": None,
                 "latest_impact_score": None,

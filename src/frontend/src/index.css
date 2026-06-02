@@ -660,6 +660,280 @@ body::before {
   text-transform: uppercase;
 }
 
+/* ---------- Company Detail ---------- */
+.company-detail__header {
+  margin-bottom: var(--space-xl);
+}
+
+.company-detail__back {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-sm) var(--space-md);
+  font-size: 0.813rem;
+  font-weight: 500;
+  color: var(--accent-blue);
+  background: var(--bg-glass);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: all 0.25s ease;
+  font-family: var(--font-sans);
+  margin-bottom: var(--space-lg);
+}
+
+.company-detail__back:hover {
+  background: var(--accent-blue-glow);
+  border-color: var(--accent-blue);
+}
+
+.company-detail__title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.company-detail__ticker {
+  font-size: 2rem;
+  font-weight: 800;
+  color: var(--accent-blue);
+  font-family: var(--font-mono);
+}
+
+.company-detail__name {
+  font-size: 1rem;
+  color: var(--text-secondary);
+  margin-top: var(--space-xs);
+}
+
+.company-detail__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  margin-top: var(--space-sm);
+}
+
+.company-detail__layout {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: var(--space-xl);
+  align-items: start;
+}
+
+@media (max-width: 768px) {
+  .company-detail__layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Source filter sidebar */
+.source-filter-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  font-size: 0.813rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: var(--font-sans);
+  text-align: left;
+}
+
+.source-filter-btn:hover:not(.source-filter-btn--disabled) {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+}
+
+.source-filter-btn--active {
+  background: var(--accent-blue-glow) !important;
+  color: var(--accent-blue) !important;
+  font-weight: 600;
+}
+
+.source-filter-btn--disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.source-filter-btn__count {
+  margin-left: auto;
+  font-size: 0.688rem;
+  color: var(--text-muted);
+  background: var(--bg-input);
+  padding: 2px 6px;
+  border-radius: var(--radius-full);
+  font-family: var(--font-mono);
+}
+
+/* Finding cards grid */
+.findings-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.finding-card {
+  background: var(--bg-card);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg);
+  cursor: pointer;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.finding-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(79, 140, 255, 0.3), transparent);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.finding-card:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--border-medium);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+.finding-card:hover::before {
+  opacity: 1;
+}
+
+.finding-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-sm);
+}
+
+.finding-card__source-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.finding-card__source-badge {
+  font-size: 0.688rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--bg-input);
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.finding-card__direction {
+  font-size: 0.875rem;
+}
+
+.finding-card__title {
+  font-size: 0.938rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: var(--space-sm);
+  line-height: 1.4;
+}
+
+.finding-card__summary {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin-bottom: var(--space-sm);
+}
+
+.finding-card__summary--truncated {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.finding-card__factors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-sm);
+}
+
+.finding-card__footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.688rem;
+  color: var(--text-muted);
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.finding-card__link {
+  color: var(--accent-blue);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.finding-card__link:hover {
+  text-decoration: underline;
+}
+
+/* ---------- Companies View ---------- */
+.companies-search {
+  padding: var(--space-sm) var(--space-md);
+  font-size: 0.875rem;
+  color: var(--text-primary);
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  font-family: var(--font-sans);
+  min-width: 200px;
+  transition: border-color 0.2s ease;
+}
+
+.companies-search:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 2px var(--accent-blue-glow);
+}
+
+.companies-search::placeholder {
+  color: var(--text-muted);
+}
+
+.companies-select {
+  padding: var(--space-sm) var(--space-md);
+  font-size: 0.875rem;
+  color: var(--text-primary);
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  font-family: var(--font-sans);
+  cursor: pointer;
+}
+
+.companies-select:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+}
+
+.companies-row:hover td {
+  background: rgba(79, 140, 255, 0.04) !important;
+}
+
 /* ---------- Animations ---------- */
 @keyframes spin {
   to { transform: rotate(360deg); }
@@ -688,3 +962,75 @@ body::before {
 .animate-in-delay-2 { animation-delay: 0.1s; }
 .animate-in-delay-3 { animation-delay: 0.15s; }
 .animate-in-delay-4 { animation-delay: 0.2s; }
+
+/* ---------- Auth Loading Screen ---------- */
+.auth-loading-screen {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-md);
+}
+
+/* ---------- Login Page ---------- */
+@keyframes loginFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.login-input:focus {
+  border-color: var(--accent-blue) !important;
+  box-shadow: 0 0 0 2px var(--accent-blue-glow) !important;
+}
+
+.login-input::placeholder {
+  color: var(--text-muted);
+}
+
+/* ---------- Logout Button ---------- */
+.logout-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 6px 14px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--bg-glass);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: all 0.25s ease;
+  font-family: var(--font-sans);
+  white-space: nowrap;
+}
+
+.logout-btn:hover {
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.25);
+  color: var(--negative);
+}
+
+.logout-btn__user {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.logout-btn__divider {
+  width: 1px;
+  height: 14px;
+  background: var(--border-subtle);
+}
+
+.logout-btn__text {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}

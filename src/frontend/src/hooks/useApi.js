@@ -24,7 +24,20 @@ export function useApi(endpoint, options = {}) {
     try {
       setLoading(true);
       setError(null);
-      const res = await fetch(`${API_BASE}${endpoint}`);
+
+      const token = localStorage.getItem('ia_token');
+      const headers = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const res = await fetch(`${API_BASE}${endpoint}`, { headers });
+
+      if (res.status === 401) {
+        window.dispatchEvent(new Event('auth-expired'));
+        throw new Error('Session expired — please log in again');
+      }
+
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
       const json = await res.json();
       setData(json);
@@ -83,4 +96,76 @@ export function useAnalysisHistory(ticker, limit = 100) {
 /** Job runs */
 export function useJobRuns(limit = 20) {
   return useApi(`/job-runs?limit=${limit}`);
+}
+
+/** Add a new company */
+export function useAddCompany() {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const addCompany = async (companyData) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const token = localStorage.getItem('ia_token');
+      const res = await fetch(`${API_BASE}/companies`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(companyData),
+      });
+      if (res.status === 401) {
+        window.dispatchEvent(new Event('auth-expired'));
+        throw new Error('Session expired');
+      }
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      return await res.json();
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return { addCompany, loading, error };
+}
+
+/** Delete a company */
+export function useDeleteCompany() {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const deleteCompany = async (ticker) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const token = localStorage.getItem('ia_token');
+      const res = await fetch(`${API_BASE}/companies/${ticker}`, {
+        method: 'DELETE',
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+      });
+      if (res.status === 401) {
+        window.dispatchEvent(new Event('auth-expired'));
+        throw new Error('Session expired');
+      }
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      return await res.json();
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return { deleteCompany, loading, error };
 }

@@ -8,7 +8,7 @@ import CompanyCard from './CompanyCard';
 import FindingsList from './FindingsList';
 import JobRunInfo from './JobRunInfo';
 
-export default function Dashboard() {
+export default function Dashboard({ onSelectCompany }) {
   const { data: summary, loading: summaryLoading } = useDashboardSummary();
   const { data: topData } = useTopFindings(10);
   const { data: jobData } = useJobRuns(10);
@@ -19,7 +19,11 @@ export default function Dashboard() {
   const totalSentiment = (sentimentDist.POSITIVE || 0) + (sentimentDist.NEGATIVE || 0) + (sentimentDist.NEUTRAL || 0);
 
   const handleCompanyClick = (ticker) => {
-    setSelectedTicker(selectedTicker === ticker ? null : ticker);
+    if (onSelectCompany) {
+      onSelectCompany(ticker);
+    } else {
+      setSelectedTicker(selectedTicker === ticker ? null : ticker);
+    }
   };
 
   return (

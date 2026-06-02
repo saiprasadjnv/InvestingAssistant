@@ -93,6 +93,98 @@ def get_company_by_ticker(ticker: str) -> Optional[Company]:
     return None
 
 
+def reload_companies() -> list[Company]:
+    """Clear the lru_cache and re-read companies from disk."""
+    load_companies.cache_clear()
+    return load_companies()
+
+
+def add_company(company_data: dict) -> Company:
+    """
+    Add a new company to the JSON config and return the Company model.
+
+    Args:
+        company_data: Dict with keys matching the Company model fields
+                      (name, ticker, sector, cik, investor_page_url, news_page_url).
+
+    Returns:
+        The newly created Company instance.
+
+    Raises:
+        ValueError: If a company with the same ticker already exists.
+    """
+    with open(COMPANIES_CONFIG_PATH, "r") as f:
+        data = json.load(f)
+
+    existing_tickers = {
+        entry["ticker"].upper()
+        for entry in data.get("interested_companies", [])
+    }
+    if company_data.get("ticker", "").upper() in existing_tickers:
+        raise ValueError(
+            f"Company with ticker '{company_data['ticker']}' already exists."
+        )
+
+    new_entry = {
+        "name": company_data["name"],
+        "ticker": company_data["ticker"],
+        "sector": company_data.get("sector", "Unknown"),
+        "CIK": company_data.get("cik", ""),
+        "investor_page_url": company_data.get("investor_page_url"),
+        "news_page_url": company_data.get("news_page_url"),
+    }
+
+    data.setdefault("interested_companies", []).append(new_entry)
+
+    with open(COMPANIES_CONFIG_PATH, "w") as f:
+        json.dump(data, f, indent=4)
+
+    reload_companies()
+
+    return Company(
+        name=new_entry["name"],
+        ticker=new_entry["ticker"],
+        sector=new_entry["sector"],
+        cik=new_entry["CIK"],
+        investor_page_url=new_entry.get("investor_page_url"),
+        news_page_url=new_entry.get("news_page_url"),
+    )
+
+
+def remove_company(ticker: str) -> bool:
+    """
+    Remove a company from the JSON config by ticker symbol.
+
+    Args:
+        ticker: The ticker symbol to remove (case-insensitive).
+
+    Returns:
+        True if the company was successfully removed.
+
+    Raises:
+        ValueError: If no company with the given ticker exists.
+    """
+    with open(COMPANIES_CONFIG_PATH, "r") as f:
+        data = json.load(f)
+
+    original = data.get("interested_companies", [])
+    filtered = [
+        entry for entry in original
+        if entry["ticker"].upper() != ticker.upper()
+    ]
+
+    if len(filtered) == len(original):
+        raise ValueError(f"No company found with ticker '{ticker}'.")
+
+    data["interested_companies"] = filtered
+
+    with open(COMPANIES_CONFIG_PATH, "w") as f:
+        json.dump(data, f, indent=4)
+
+    reload_companies()
+    return True
+
+
 # ---------------------------------------------------------------------------
 # API Key Management
 # ---------------------------------------------------------------------------

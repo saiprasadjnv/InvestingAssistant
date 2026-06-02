@@ -368,6 +368,53 @@ class DynamoStorage:
             logger.error(f"Failed to get job runs: {e}")
             raise
 
+    # -- Per-user Company Lists ---------------------------------------------
+
+    def get_user_companies(self, username: str) -> list[dict] | None:
+        """Get the company list for a user from DynamoDB."""
+        try:
+            response = self._processed_table.get_item(
+                Key={"PK": f"USER#{username}", "SK": "COMPANIES"}
+            )
+            item = response.get("Item")
+            if item is None:
+                return None
+            return _decimal_to_float(item.get("companies", []))
+        except ClientError as e:
+            logger.error("Failed to get user companies: %s", e)
+            raise
+
+    def put_user_companies(self, username: str, companies: list[dict]) -> None:
+        """Save the full company list for a user."""
+        item = {
+            "PK": f"USER#{username}",
+            "SK": "COMPANIES",
+            "companies": companies,
+            "updated_at": _utcnow().isoformat(),
+        }
+        try:
+            self._processed_table.put_item(Item=_float_to_decimal(item))
+            logger.info("Saved %d companies for user %s", len(companies), username)
+        except ClientError as e:
+            logger.error("Failed to save user companies: %s", e)
+            raise
+
+    def add_user_company(self, username: str, company: dict) -> None:
+        """Add a single company to a user's list. Raises ValueError on duplicate ticker."""
+        companies = self.get_user_companies(username) or []
+        if any(c["ticker"].upper() == company["ticker"].upper() for c in companies):
+            raise ValueError(f"Company with ticker '{company['ticker']}' already exists.")
+        companies.append(company)
+        self.put_user_companies(username, companies)
+
+    def remove_user_company(self, username: str, ticker: str) -> None:
+        """Remove a company from a user's list by ticker. Raises ValueError if not found."""
+        companies = self.get_user_companies(username) or []
+        filtered = [c for c in companies if c["ticker"].upper() != ticker.upper()]
+        if len(filtered) == len(companies):
+            raise ValueError(f"No company found with ticker '{ticker}'.")
+        self.put_user_companies(username, filtered)
+
     @staticmethod
     def _key(name: str):
         """Helper to create a DynamoDB Key condition."""
@@ -440,6 +487,7 @@ class LocalDynamoStorage:
         self._analysis_file = self.base_dir / "analysis_results.json"
         self._processed_file = self.base_dir / "processed_documents.json"
         self._job_runs_file = self.base_dir / "job_runs.json"
+        self._user_companies_file = self.base_dir / "user_companies.json"
 
     def _load(self, path: Path) -> list[dict]:
         if not path.exists():
@@ -523,6 +571,46 @@ class LocalDynamoStorage:
         items = self._load(self._job_runs_file)
         items.sort(key=lambda x: x.get("started_at", ""), reverse=True)
         return items[:limit]
+
+    # -- Per-user Company Lists ---------------------------------------------
+
+    def get_user_companies(self, username: str) -> list[dict] | None:
+        """Get the company list for a user. Returns None if user has no saved list."""
+        items = self._load(self._user_companies_file)
+        for item in items:
+            if item.get("PK") == f"USER#{username}":
+                return item.get("companies", [])
+        return None
+
+    def put_user_companies(self, username: str, companies: list[dict]) -> None:
+        """Save the full company list for a user."""
+        items = self._load(self._user_companies_file)
+        # Remove existing entry for this user
+        items = [i for i in items if i.get("PK") != f"USER#{username}"]
+        items.append({
+            "PK": f"USER#{username}",
+            "SK": "COMPANIES",
+            "companies": companies,
+            "updated_at": _utcnow().isoformat(),
+        })
+        self._save(self._user_companies_file, items)
+        logger.info("Saved %d companies for user %s", len(companies), username)
+
+    def add_user_company(self, username: str, company: dict) -> None:
+        """Add a single company to a user's list. Raises ValueError on duplicate ticker."""
+        companies = self.get_user_companies(username) or []
+        if any(c["ticker"].upper() == company["ticker"].upper() for c in companies):
+            raise ValueError(f"Company with ticker '{company['ticker']}' already exists.")
+        companies.append(company)
+        self.put_user_companies(username, companies)
+
+    def remove_user_company(self, username: str, ticker: str) -> None:
+        """Remove a company from a user's list by ticker. Raises ValueError if not found."""
+        companies = self.get_user_companies(username) or []
+        filtered = [c for c in companies if c["ticker"].upper() != ticker.upper()]
+        if len(filtered) == len(companies):
+            raise ValueError(f"No company found with ticker '{ticker}'.")
+        self.put_user_companies(username, filtered)
 
 
 # ---------------------------------------------------------------------------

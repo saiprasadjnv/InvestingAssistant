@@ -25,7 +25,8 @@ import asyncio
 import hashlib
 import json
 import logging
-from datetime import datetime
+import re
+from datetime import datetime, timezone
 from typing import Any
 
 from src.shared.config import get_company_by_ticker
@@ -52,7 +53,7 @@ logger.setLevel(logging.INFO)
 
 def _build_result_id(ticker: str, source: DataSource) -> str:
     """Generate a unique result ID: ``{ticker}_{source}_{timestamp_hash}``."""
-    ts = datetime.utcnow().isoformat()
+    ts = datetime.now(timezone.utc).isoformat()
     short_hash = hashlib.sha256(ts.encode()).hexdigest()[:8]
     return f"{ticker}_{source.value}_{short_hash}"
 
@@ -61,32 +62,110 @@ def _parse_llm_response(raw_text: str) -> dict[str, Any]:
     """Parse the LLM JSON response, gracefully handling edge cases.
 
     The LLM is instructed to return bare JSON, but some models may wrap
-    it in markdown code fences. This parser handles both.
+    it in markdown code fences or return truncated output.  This parser
+    applies several fallback strategies before giving up:
+
+    1. Strip markdown code fences and try ``json.loads``.
+    2. Regex-extract a JSON object and try ``json.loads``.
+    3. Attempt to repair truncated JSON (add missing closing tokens).
+    4. Extract individual fields via regex as a last resort.
     """
     text = raw_text.strip()
 
-    # Strip markdown code fences if present
+    # --- Step 1: Strip markdown code fences if present -----------------
     if text.startswith("```"):
         lines = text.splitlines()
-        # Remove first and last lines (```json and ```)
         lines = [l for l in lines if not l.strip().startswith("```")]
         text = "\n".join(lines).strip()
 
+    # --- Step 2: Direct parse ------------------------------------------
     try:
-        data = json.loads(text)
-    except json.JSONDecodeError as exc:
-        logger.error("Failed to parse LLM JSON response: %s | raw=%s", exc, raw_text[:200])
-        # Return safe defaults
-        return {
-            "sentiment": "NEUTRAL",
-            "sentiment_confidence": 0.0,
-            "impact_direction": "NEUTRAL",
-            "impact_magnitude": 0.0,
-            "summary": "LLM response could not be parsed.",
-            "key_factors": [],
-        }
+        return json.loads(text)
+    except json.JSONDecodeError:
+        logger.debug("Direct json.loads failed; trying regex extraction.")
 
-    return data
+    # --- Step 3: Regex – nested JSON object ----------------------------
+    nested_pattern = re.compile(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}')
+    match = nested_pattern.search(text)
+    if match:
+        try:
+            data = json.loads(match.group())
+            logger.info("Parsed LLM response via nested-object regex.")
+            return data
+        except json.JSONDecodeError:
+            logger.debug("Nested-object regex match was not valid JSON.")
+
+    # --- Step 4: Regex – greedy match (allows deeply nested) -----------
+    greedy_match = re.search(r'\{.*\}', text, re.DOTALL)
+    if greedy_match:
+        try:
+            data = json.loads(greedy_match.group())
+            logger.info("Parsed LLM response via greedy regex.")
+            return data
+        except json.JSONDecodeError:
+            logger.debug("Greedy regex match was not valid JSON.")
+
+    # --- Step 5: Repair truncated JSON ---------------------------------
+    candidate = greedy_match.group() if greedy_match else text
+    repaired = _try_repair_json(candidate)
+    if repaired is not None:
+        logger.info("Parsed LLM response after repairing truncated JSON.")
+        return repaired
+
+    # --- Step 6: Extract individual fields as last resort ---------------
+    logger.warning(
+        "All JSON parsing strategies failed; extracting fields via regex. "
+        "raw=%s",
+        raw_text[:300],
+    )
+    return _extract_fields_by_regex(text)
+
+
+def _try_repair_json(text: str) -> dict[str, Any] | None:
+    """Try to fix truncated JSON by appending missing closing tokens."""
+    # Count unbalanced braces / brackets
+    for extra in ('', ']', '}', ']}', '"]}', '"}', '"]}'  ):
+        try:
+            return json.loads(text + extra)
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
+def _extract_fields_by_regex(text: str) -> dict[str, Any]:
+    """Pull individual fields out of malformed LLM output via regex."""
+    defaults: dict[str, Any] = {
+        "sentiment": "NEUTRAL",
+        "sentiment_confidence": 0.0,
+        "impact_direction": "NEUTRAL",
+        "impact_magnitude": 0.0,
+        "summary": "LLM response could not be parsed.",
+        "key_factors": [],
+    }
+
+    # String fields
+    for field in ("sentiment", "impact_direction", "summary"):
+        m = re.search(rf'"{field}"\s*:\s*"([^"]+)"', text)
+        if m:
+            defaults[field] = m.group(1)
+
+    # Float fields
+    for field in ("sentiment_confidence", "impact_magnitude"):
+        m = re.search(rf'"{field}"\s*:\s*([\d.]+)', text)
+        if m:
+            try:
+                defaults[field] = float(m.group(1))
+            except ValueError:
+                pass
+
+    # key_factors (list of strings)
+    m = re.search(r'"key_factors"\s*:\s*\[([^\]]*)', text)
+    if m:
+        factors = re.findall(r'"([^"]+)"', m.group(1))
+        if factors:
+            defaults["key_factors"] = factors
+
+    return defaults
 
 
 def _coerce_sentiment(value: str) -> Sentiment:

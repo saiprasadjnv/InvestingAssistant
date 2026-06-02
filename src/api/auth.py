@@ -11,6 +11,7 @@ Provides:
 
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -20,6 +21,11 @@ import jwt
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
+
+from src.shared.config import load_companies
+from src.shared.storage import create_dynamo_storage
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -121,6 +127,38 @@ async def get_current_user(
 
 auth_router = APIRouter(prefix="/auth", tags=["Auth"])
 
+# Lazy-initialised storage (shared across requests)
+_dynamo = None
+
+
+def _get_dynamo():
+    global _dynamo
+    if _dynamo is None:
+        _dynamo = create_dynamo_storage()
+    return _dynamo
+
+
+def _seed_user_if_new(username: str) -> None:
+    """Copy the default companies list into the database for first-time users."""
+    dynamo = _get_dynamo()
+    if dynamo.get_user_companies(username) is not None:
+        return  # User already has a saved list
+
+    defaults = load_companies()
+    companies = [
+        {
+            "name": c.name,
+            "ticker": c.ticker,
+            "sector": c.sector,
+            "cik": c.cik,
+            "investor_page_url": c.investor_page_url,
+            "news_page_url": c.news_page_url,
+        }
+        for c in defaults
+    ]
+    dynamo.put_user_companies(username, companies)
+    logger.info("Seeded %d default companies for new user %s", len(companies), username)
+
 
 @auth_router.post("/login", response_model=TokenResponse)
 async def login(body: LoginRequest):
@@ -130,6 +168,7 @@ async def login(body: LoginRequest):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",
         )
+    _seed_user_if_new(body.username)
     token = create_access_token(body.username)
     return TokenResponse(access_token=token, username=body.username)
 
@@ -168,6 +207,7 @@ async def google_login(body: GoogleLoginRequest):
             detail="Email not in allow-list",
         )
 
+    _seed_user_if_new(email)
     token = create_access_token(email)
     return TokenResponse(access_token=token, username=email)
 

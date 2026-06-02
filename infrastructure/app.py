@@ -9,6 +9,7 @@ Deploys four stacks in dependency order:
   4. FrontendStack  — S3 + CloudFront
 """
 
+import os
 import aws_cdk as cdk
 
 from stacks.storage_stack import StorageStack
@@ -19,7 +20,7 @@ from stacks.frontend_stack import FrontendStack
 app = cdk.App()
 
 env = cdk.Environment(
-    account=app.node.try_get_context("account") or None,
+    account=app.node.try_get_context("account") or os.environ.get("CDK_DEFAULT_ACCOUNT"),
     region=app.node.try_get_context("region") or "us-east-1",
 )
 
@@ -33,7 +34,7 @@ tags = {
 # 1. Stateful resources — separate stack to prevent accidental deletion
 storage = StorageStack(app, "InvestingAssistant-Storage", env=env)
 
-# 2. Pipeline — scrapers, analyzers, orchestration
+# 2. Pipeline — scrapers, analyzers, orchestration (runs every 12 hours)
 pipeline = PipelineStack(
     app,
     "InvestingAssistant-Pipeline",

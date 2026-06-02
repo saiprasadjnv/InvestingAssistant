@@ -15,7 +15,7 @@ from aws_cdk import (
     aws_dynamodb as dynamodb,
 )
 
-SRC_DIR = str(Path(__file__).resolve().parent.parent.parent / "src")
+PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent)
 
 
 class ApiStack(Stack):
@@ -35,6 +35,14 @@ class ApiStack(Stack):
         super().__init__(scope, construct_id, **kwargs)
 
         # ---------------------------------------------------------------
+        # Auth config from CDK context
+        # ---------------------------------------------------------------
+        jwt_secret = self.node.try_get_context("jwt_secret") or "investing-assistant-dev-secret-change-me"
+        admin_username = self.node.try_get_context("admin_username") or "admin"
+        admin_password = self.node.try_get_context("admin_password") or "admin"
+        google_client_id = self.node.try_get_context("google_client_id") or ""
+
+        # ---------------------------------------------------------------
         # API Lambda
         # ---------------------------------------------------------------
         api_lambda = _lambda.Function(
@@ -42,8 +50,17 @@ class ApiStack(Stack):
             "ApiFunction",
             function_name="InvestingAssistant-Api",
             runtime=_lambda.Runtime.PYTHON_3_12,
-            code=_lambda.Code.from_asset(f"{SRC_DIR}/api"),
-            handler="handler.handler",
+            code=_lambda.Code.from_asset(
+                PROJECT_ROOT,
+                exclude=[
+                    ".venv/**", "node_modules/**", ".git/**", ".local_data/**",
+                    "infrastructure/**", "*.pyc", "__pycache__/**",
+                    "src/frontend/**", "scripts/**", "*.egg-info/**",
+                    ".env", ".env.example", "*.md", ".gitignore",
+                    ".DS_Store", "build/**",
+                ],
+            ),
+            handler="src.api.handler.handler",
             memory_size=256,
             timeout=Duration.seconds(30),
             environment={
@@ -52,13 +69,17 @@ class ApiStack(Stack):
                 "ANALYSIS_TABLE": analysis_table.table_name,
                 "PROCESSED_DOCS_TABLE": processed_docs_table.table_name,
                 "JOB_RUNS_TABLE": job_runs_table.table_name,
+                "JWT_SECRET": jwt_secret,
+                "ADMIN_USERNAME": admin_username,
+                "ADMIN_PASSWORD": admin_password,
+                "VITE_GOOGLE_CLIENT_ID": google_client_id,
             },
             tracing=_lambda.Tracing.ACTIVE,
         )
 
         # Grant read permissions
         analysis_table.grant_read_data(api_lambda)
-        processed_docs_table.grant_read_data(api_lambda)
+        processed_docs_table.grant_read_write_data(api_lambda)
         job_runs_table.grant_read_data(api_lambda)
         raw_bucket.grant_read(api_lambda)
 

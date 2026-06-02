@@ -1,7 +1,7 @@
 """
 Pipeline Stack — Scraper Lambdas, Analyzer Lambdas, Step Functions, EventBridge.
 
-Orchestrates the data collection and analysis pipeline that runs every 3 hours.
+Orchestrates the data collection and analysis pipeline that runs every 12 hours.
 """
 
 from pathlib import Path
@@ -23,8 +23,8 @@ from aws_cdk import (
     aws_dynamodb as dynamodb,
 )
 
-# Path to the project source code (relative to infrastructure/)
-SRC_DIR = str(Path(__file__).resolve().parent.parent.parent / "src")
+# Path to the project root for Lambda packaging
+PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent)
 
 
 class PipelineStack(Stack):
@@ -87,22 +87,22 @@ class PipelineStack(Stack):
         # Scraper Lambda Functions
         # ---------------------------------------------------------------
         sec_lambda = self._create_lambda(
-            "SECAgent", "scrapers/sec_agent", "handler.handler",
+            "SECAgent", "src.scrapers.sec_agent.handler.handler",
             memory=512, timeout=900, env=common_env,
         )
 
         company_info_lambda = self._create_lambda(
-            "CompanyInfoAgent", "scrapers/company_info_agent", "handler.handler",
+            "CompanyInfoAgent", "src.scrapers.company_info_agent.handler.handler",
             memory=512, timeout=900, env=common_env,
         )
 
         reddit_lambda = self._create_lambda(
-            "RedditAgent", "scrapers/reddit_agent", "handler.handler",
+            "RedditAgent", "src.scrapers.reddit_agent.handler.handler",
             memory=512, timeout=900, env=common_env,
         )
 
         x_lambda = self._create_lambda(
-            "XAgent", "scrapers/x_agent", "handler.handler",
+            "XAgent", "src.scrapers.x_agent.handler.handler",
             memory=512, timeout=900, env=common_env,
         )
 
@@ -110,12 +110,12 @@ class PipelineStack(Stack):
         # Analyzer Lambda Functions
         # ---------------------------------------------------------------
         sentiment_lambda = self._create_lambda(
-            "SentimentAnalyzer", "analyzers/sentiment_analyzer", "handler.handler",
+            "SentimentAnalyzer", "src.analyzers.sentiment_analyzer.handler.handler",
             memory=256, timeout=600, env=common_env,
         )
 
         impact_lambda = self._create_lambda(
-            "ImpactScorer", "analyzers/impact_scorer", "handler.handler",
+            "ImpactScorer", "src.analyzers.impact_scorer.handler.handler",
             memory=256, timeout=300, env=common_env,
         )
 
@@ -243,12 +243,12 @@ class PipelineStack(Stack):
         )
 
         # ---------------------------------------------------------------
-        # EventBridge Scheduler — every 3 hours
+        # EventBridge Scheduler — every 12 hours
         # ---------------------------------------------------------------
         events.Rule(
             self, "PipelineSchedule",
             rule_name="InvestingAssistant-Schedule",
-            schedule=events.Schedule.rate(Duration.hours(3)),
+            schedule=events.Schedule.rate(Duration.hours(12)),
             targets=[events_targets.SfnStateMachine(state_machine)],
         )
 
@@ -261,7 +261,6 @@ class PipelineStack(Stack):
     def _create_lambda(
         self,
         id: str,
-        code_path: str,
         handler: str,
         *,
         memory: int = 256,
@@ -274,7 +273,16 @@ class PipelineStack(Stack):
             id,
             function_name=f"InvestingAssistant-{id}",
             runtime=_lambda.Runtime.PYTHON_3_12,
-            code=_lambda.Code.from_asset(f"{SRC_DIR}/{code_path}"),
+            code=_lambda.Code.from_asset(
+                PROJECT_ROOT,
+                exclude=[
+                    ".venv/**", "node_modules/**", ".git/**", ".local_data/**",
+                    "infrastructure/**", "*.pyc", "__pycache__/**",
+                    "src/frontend/**", "scripts/**", "*.egg-info/**",
+                    ".env", ".env.example", "*.md", ".gitignore",
+                    ".DS_Store", "build/**",
+                ],
+            ),
             handler=handler,
             memory_size=memory,
             timeout=Duration.seconds(timeout),

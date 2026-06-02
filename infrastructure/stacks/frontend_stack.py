@@ -53,6 +53,10 @@ class FrontendStack(Stack):
         )
         site_bucket.grant_read(oai)
 
+        # Extract API Gateway domain from URL token
+        # api_url is like "https://abc123.execute-api.us-east-1.amazonaws.com/"
+        api_domain = cdk.Fn.select(2, cdk.Fn.split("/", api_url))
+
         distribution = cloudfront.Distribution(
             self,
             "FrontendDistribution",
@@ -60,8 +64,17 @@ class FrontendStack(Stack):
             default_behavior=cloudfront.BehaviorOptions(
                 origin=origins.S3Origin(site_bucket, origin_access_identity=oai),
                 viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
-                cache_policy=cloudfront.CachePolicy.CACHING_OPTIMIZED,
+                cache_policy=cloudfront.CachePolicy.CACHING_DISABLED,  # SPA needs no-cache for index.html
             ),
+            additional_behaviors={
+                "/api/*": cloudfront.BehaviorOptions(
+                    origin=origins.HttpOrigin(api_domain),
+                    viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+                    cache_policy=cloudfront.CachePolicy.CACHING_DISABLED,
+                    origin_request_policy=cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+                    allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
+                ),
+            },
             default_root_object="index.html",
             error_responses=[
                 # SPA routing: return index.html for 403/404

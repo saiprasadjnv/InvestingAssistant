@@ -15,7 +15,7 @@ import './index.css';
 const VIEWS = ['Dashboard', 'Companies', 'Job Runs'];
 
 export default function App() {
-  const { user, isAuthenticated, login, loginWithGoogle, logout, loading: authLoading } = useAuth();
+  const { user, isAuthenticated, login, loginWithGoogle, register, logout, loading: authLoading } = useAuth();
   const [activeView, setActiveView] = useState('Dashboard');
   const [selectedCompany, setSelectedCompany] = useState(null);
 
@@ -40,7 +40,7 @@ export default function App() {
 
   // Show login page if not authenticated
   if (!isAuthenticated) {
-    return <LoginPage onLogin={login} onGoogleLogin={loginWithGoogle} />;
+    return <LoginPage onLogin={login} onGoogleLogin={loginWithGoogle} onRegister={register} />;
   }
 
   const handleCompanySelect = (ticker) => {

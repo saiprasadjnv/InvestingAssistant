@@ -415,6 +415,43 @@ class DynamoStorage:
             raise ValueError(f"No company found with ticker '{ticker}'.")
         self.put_user_companies(username, filtered)
 
+    # -- User Credentials (Registration) ------------------------------------
+
+    def get_user_credentials(self, username: str) -> dict | None:
+        """Get stored credentials for a user. Returns None if user not registered."""
+        try:
+            response = self._processed_table.get_item(
+                Key={"PK": f"USER#{username}", "SK": "CREDENTIALS"}
+            )
+            item = response.get("Item")
+            if item is None:
+                return None
+            return _decimal_to_float(item)
+        except ClientError as e:
+            logger.error("Failed to get user credentials: %s", e)
+            raise
+
+    def put_user_credentials(self, username: str, hashed_password: str, salt: str, email: str = "") -> None:
+        """Store user credentials."""
+        item = {
+            "PK": f"USER#{username}",
+            "SK": "CREDENTIALS",
+            "hashed_password": hashed_password,
+            "salt": salt,
+            "email": email,
+            "created_at": _utcnow().isoformat(),
+        }
+        try:
+            self._processed_table.put_item(Item=_float_to_decimal(item))
+            logger.info("Stored credentials for user %s", username)
+        except ClientError as e:
+            logger.error("Failed to store user credentials: %s", e)
+            raise
+
+    def user_exists(self, username: str) -> bool:
+        """Check if a user is registered."""
+        return self.get_user_credentials(username) is not None
+
     @staticmethod
     def _key(name: str):
         """Helper to create a DynamoDB Key condition."""
@@ -611,6 +648,33 @@ class LocalDynamoStorage:
         if len(filtered) == len(companies):
             raise ValueError(f"No company found with ticker '{ticker}'.")
         self.put_user_companies(username, filtered)
+
+    # -- User Credentials (Registration) ------------------------------------
+
+    def get_user_credentials(self, username: str) -> dict | None:
+        items = self._load(self._user_companies_file)
+        for item in items:
+            if item.get("PK") == f"USER#{username}" and item.get("SK") == "CREDENTIALS":
+                return item
+        return None
+
+    def put_user_credentials(self, username: str, hashed_password: str, salt: str, email: str = "") -> None:
+        items = self._load(self._user_companies_file)
+        # Remove existing credentials for this user
+        items = [i for i in items if not (i.get("PK") == f"USER#{username}" and i.get("SK") == "CREDENTIALS")]
+        items.append({
+            "PK": f"USER#{username}",
+            "SK": "CREDENTIALS",
+            "hashed_password": hashed_password,
+            "salt": salt,
+            "email": email,
+            "created_at": _utcnow().isoformat(),
+        })
+        self._save(self._user_companies_file, items)
+        logger.info("Stored credentials for user %s", username)
+
+    def user_exists(self, username: str) -> bool:
+        return self.get_user_credentials(username) is not None
 
 
 # ---------------------------------------------------------------------------

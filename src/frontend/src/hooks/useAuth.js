@@ -91,5 +91,23 @@ export function useAuth() {
     return data;
   }, [saveSession]);
 
-  return { user, token, isAuthenticated, login, loginWithGoogle, logout, loading };
+  // Register (sign up) a new account
+  const register = useCallback(async (username, password, email = '') => {
+    const res = await fetch(`${API_BASE}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, email }),
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || body.message || `Registration failed (${res.status})`);
+    }
+
+    const data = await res.json();
+    saveSession(data.token || data.access_token, data.user || { username });
+    return data;
+  }, [saveSession]);
+
+  return { user, token, isAuthenticated, login, loginWithGoogle, register, logout, loading };
 }

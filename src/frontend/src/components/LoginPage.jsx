@@ -36,12 +36,14 @@ function Spinner({ size = 20 }) {
   );
 }
 
-export default function LoginPage({ onLogin, onGoogleLogin }) {
+export default function LoginPage({ onLogin, onGoogleLogin, onRegister }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [mode, setMode] = useState('login'); // 'login' or 'signup'
+  const [confirmPassword, setConfirmPassword] = useState('');
   const googleBtnRef = useRef(null);
 
   /* ---------- Google Identity Services ---------- */
@@ -99,12 +101,20 @@ export default function LoginPage({ onLogin, onGoogleLogin }) {
       setError('Please enter both username and password');
       return;
     }
+    if (mode === 'signup' && password !== confirmPassword) {
+      setError('Passwords do not match');
+      return;
+    }
     setError('');
     setLoading(true);
     try {
-      await onLogin(username, password);
+      if (mode === 'signup') {
+        await onRegister(username, password);
+      } else {
+        await onLogin(username, password);
+      }
     } catch (err) {
-      setError(err.message || 'Login failed');
+      setError(err.message || (mode === 'signup' ? 'Registration failed' : 'Login failed'));
     } finally {
       setLoading(false);
     }
@@ -272,8 +282,8 @@ export default function LoginPage({ onLogin, onGoogleLogin }) {
           {/* Logo / Title */}
           <div style={styles.logoArea}>
             <div style={styles.logoIcon}>📈</div>
-            <div style={styles.title}>InvestingAssistant</div>
-            <div style={styles.subtitle}>AI-Powered Stock Intelligence</div>
+            <div style={styles.title}>{mode === 'login' ? 'InvestingAssistant' : 'Create Account'}</div>
+            <div style={styles.subtitle}>{mode === 'login' ? 'AI-Powered Stock Intelligence' : 'Join InvestingAssistant today'}</div>
           </div>
 
           {/* Error message */}
@@ -311,6 +321,23 @@ export default function LoginPage({ onLogin, onGoogleLogin }) {
               />
             </div>
 
+            {mode === 'signup' && (
+              <div style={styles.inputGroup}>
+                <label style={styles.label} htmlFor="login-confirm-password">Confirm Password</label>
+                <input
+                  id="login-confirm-password"
+                  type="password"
+                  placeholder="Confirm your password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  disabled={loading}
+                  autoComplete="new-password"
+                  className="login-input"
+                  style={styles.input}
+                />
+              </div>
+            )}
+
             <button
               type="submit"
               disabled={loading}
@@ -325,49 +352,74 @@ export default function LoginPage({ onLogin, onGoogleLogin }) {
                 e.currentTarget.style.transform = 'translateY(0)';
               }}
             >
-              {loading ? <Spinner /> : 'Sign In'}
+              {loading ? <Spinner /> : (mode === 'login' ? 'Sign In' : 'Create Account')}
             </button>
           </form>
 
-          {/* Divider */}
-          <div style={styles.divider}>
-            <div style={styles.dividerLine} />
-            <span style={styles.dividerText}>— or —</span>
-            <div style={styles.dividerLine} />
-          </div>
+          {/* Divider + Google Sign-In only in login mode */}
+          {mode === 'login' && (
+            <>
+              <div style={styles.divider}>
+                <div style={styles.dividerLine} />
+                <span style={styles.dividerText}>— or —</span>
+                <div style={styles.dividerLine} />
+              </div>
 
-          {/* Google Sign-In */}
-          {GOOGLE_CLIENT_ID ? (
-            <div style={styles.googleContainer}>
-              {googleLoading ? (
-                <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--space-sm) 0' }}>
-                  <Spinner size={24} />
+              {/* Google Sign-In */}
+              {GOOGLE_CLIENT_ID ? (
+                <div style={styles.googleContainer}>
+                  {googleLoading ? (
+                    <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--space-sm) 0' }}>
+                      <Spinner size={24} />
+                    </div>
+                  ) : (
+                    <div ref={googleBtnRef} style={{ width: '100%' }} />
+                  )}
                 </div>
               ) : (
-                <div ref={googleBtnRef} style={{ width: '100%' }} />
+                <button
+                  type="button"
+                  style={styles.googleBtn}
+                  disabled={googleLoading}
+                  onClick={() => {
+                    setError('Google Sign-In is not configured. Set VITE_GOOGLE_CLIENT_ID.');
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = '#f8f9fa';
+                    e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = '#fff';
+                    e.currentTarget.style.boxShadow = 'none';
+                  }}
+                >
+                  <GoogleIcon />
+                  Sign in with Google
+                </button>
               )}
-            </div>
-          ) : (
-            <button
-              type="button"
-              style={styles.googleBtn}
-              disabled={googleLoading}
-              onClick={() => {
-                setError('Google Sign-In is not configured. Set VITE_GOOGLE_CLIENT_ID.');
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = '#f8f9fa';
-                e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = '#fff';
-                e.currentTarget.style.boxShadow = 'none';
-              }}
-            >
-              <GoogleIcon />
-              Sign in with Google
-            </button>
+            </>
           )}
+
+          {/* Mode toggle link */}
+          <p style={{ textAlign: 'center', marginTop: 'var(--space-lg, 24px)', color: 'var(--text-muted)', fontSize: '0.875rem' }}>
+            {mode === 'login' ? (
+              <>Don't have an account?{' '}
+                <button
+                  type="button"
+                  onClick={() => { setMode('signup'); setError(''); setConfirmPassword(''); }}
+                  style={{ background: 'none', border: 'none', color: 'var(--accent-blue)', cursor: 'pointer', fontWeight: 600, fontSize: '0.875rem', padding: 0 }}
+                >Sign Up</button>
+              </>
+            ) : (
+              <>Already have an account?{' '}
+                <button
+                  type="button"
+                  onClick={() => { setMode('login'); setError(''); setConfirmPassword(''); }}
+                  style={{ background: 'none', border: 'none', color: 'var(--accent-blue)', cursor: 'pointer', fontWeight: 600, fontSize: '0.875rem', padding: 0 }}
+                >Sign In</button>
+              </>
+            )}
+          </p>
         </div>
       </div>
     </div>

@@ -11,8 +11,10 @@ Provides:
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
+import secrets as secrets_module
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -26,6 +28,25 @@ from src.shared.config import load_companies
 from src.shared.storage import create_dynamo_storage
 
 logger = logging.getLogger(__name__)
+
+
+def _hash_password(password: str) -> tuple[str, str]:
+    """Hash a password with a random salt using PBKDF2."""
+    salt = secrets_module.token_hex(32)
+    hashed = hashlib.pbkdf2_hmac(
+        "sha256", password.encode(), salt.encode(), 100_000
+    ).hex()
+    return hashed, salt
+
+
+def _verify_password(password: str, hashed: str, salt: str) -> bool:
+    """Verify a password against its hash."""
+    return (
+        hashlib.pbkdf2_hmac(
+            "sha256", password.encode(), salt.encode(), 100_000
+        ).hex()
+        == hashed
+    )
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -72,6 +93,12 @@ def verify_token(token: str) -> dict:
 class LoginRequest(BaseModel):
     username: str
     password: str
+
+
+class RegisterRequest(BaseModel):
+    username: str
+    password: str
+    email: str = ""
 
 
 class GoogleLoginRequest(BaseModel):
@@ -163,14 +190,57 @@ def _seed_user_if_new(username: str) -> None:
 @auth_router.post("/login", response_model=TokenResponse)
 async def login(body: LoginRequest):
     """Authenticate with username + password and receive a JWT."""
-    if body.username != ADMIN_USERNAME or body.password != ADMIN_PASSWORD:
+    # 1. Check hardcoded admin credentials
+    if body.username == ADMIN_USERNAME and body.password == ADMIN_PASSWORD:
+        _seed_user_if_new(body.username)
+        token = create_access_token(body.username)
+        return TokenResponse(access_token=token, username=body.username)
+
+    # 2. Check registered users in database
+    dynamo = _get_dynamo()
+    creds = dynamo.get_user_credentials(body.username)
+    if creds and _verify_password(body.password, creds["hashed_password"], creds["salt"]):
+        _seed_user_if_new(body.username)
+        token = create_access_token(body.username)
+        return TokenResponse(access_token=token, username=body.username)
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid username or password",
+    )
+
+
+@auth_router.post("/register", response_model=TokenResponse, status_code=201)
+async def register(body: RegisterRequest):
+    """Register a new user account."""
+    username = body.username.strip()
+    if not username or len(username) < 3:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username must be at least 3 characters.",
         )
-    _seed_user_if_new(body.username)
-    token = create_access_token(body.username)
-    return TokenResponse(access_token=token, username=body.username)
+    if len(body.password) < 6:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must be at least 6 characters.",
+        )
+    # Check if username is reserved (admin)
+    if username.lower() == ADMIN_USERNAME.lower():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Username is not available.",
+        )
+    dynamo = _get_dynamo()
+    if dynamo.user_exists(username):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Username '{username}' is already taken.",
+        )
+    hashed, salt = _hash_password(body.password)
+    dynamo.put_user_credentials(username, hashed, salt, body.email)
+    _seed_user_if_new(username)
+    token = create_access_token(username)
+    return TokenResponse(access_token=token, username=username)
 
 
 @auth_router.post("/google", response_model=TokenResponse)

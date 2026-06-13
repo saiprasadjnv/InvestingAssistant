@@ -43,6 +43,17 @@ class ApiStack(Stack):
         google_client_id = self.node.try_get_context("google_client_id") or ""
 
         # ---------------------------------------------------------------
+        # Lambda Layer — Python dependencies (built in CI/CD)
+        # ---------------------------------------------------------------
+        layer_path = str(Path(PROJECT_ROOT) / "build" / "lambda-layer")
+        deps_layer = _lambda.LayerVersion(
+            self, "PythonDepsLayer",
+            code=_lambda.Code.from_asset(layer_path),
+            compatible_runtimes=[_lambda.Runtime.PYTHON_3_12],
+            description="Python dependencies for InvestingAssistant API",
+        )
+
+        # ---------------------------------------------------------------
         # API Lambda
         # ---------------------------------------------------------------
         api_lambda = _lambda.Function(
@@ -61,6 +72,7 @@ class ApiStack(Stack):
                 ],
             ),
             handler="src.api.handler.handler",
+            layers=[deps_layer],
             memory_size=256,
             timeout=Duration.seconds(30),
             environment={

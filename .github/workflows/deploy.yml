@@ -49,6 +49,16 @@ jobs:
           npm ci
           npm run build
 
+      - name: Build Lambda Layer
+        run: |
+          mkdir -p build/lambda-layer/python
+          pip install \
+            -r requirements-lambda.txt \
+            -t build/lambda-layer/python/ \
+            --platform manylinux2014_x86_64 \
+            --python-version 3.12 \
+            --only-binary=:all:
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:

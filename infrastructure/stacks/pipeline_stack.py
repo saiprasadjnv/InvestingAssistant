@@ -44,6 +44,17 @@ class PipelineStack(Stack):
         super().__init__(scope, construct_id, **kwargs)
 
         # ---------------------------------------------------------------
+        # Lambda Layer — Python dependencies (built in CI/CD)
+        # ---------------------------------------------------------------
+        layer_path = str(Path(PROJECT_ROOT) / "build" / "lambda-layer")
+        self._deps_layer = _lambda.LayerVersion(
+            self, "PythonDepsLayer",
+            code=_lambda.Code.from_asset(layer_path),
+            compatible_runtimes=[_lambda.Runtime.PYTHON_3_12],
+            description="Python dependencies for InvestingAssistant Lambdas",
+        )
+
+        # ---------------------------------------------------------------
         # Secrets Manager — reference existing secrets (created by bootstrap)
         # ---------------------------------------------------------------
         reddit_secret = secretsmanager.Secret.from_secret_name_v2(
@@ -278,6 +289,7 @@ class PipelineStack(Stack):
                 ],
             ),
             handler=handler,
+            layers=[self._deps_layer],
             memory_size=memory,
             timeout=Duration.seconds(timeout),
             environment=env or {},

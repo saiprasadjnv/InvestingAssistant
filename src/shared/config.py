@@ -289,21 +289,35 @@ def get_s3_bucket_name() -> str:
 
 def get_dynamodb_table_name(table_key: str) -> str:
     """
-    Return the DynamoDB table name, respecting environment prefix.
+    Return the DynamoDB table name.
+
+    In AWS, reads from environment variables set by CDK (ANALYSIS_TABLE,
+    PROCESSED_DOCS_TABLE, JOB_RUNS_TABLE).  Falls back to a constructed
+    name for local development.
 
     Args:
         table_key: One of 'analysis', 'processed_docs', 'job_runs'
     """
-    env = get_environment()
-    prefix = f"{env}-" if env != "prod" else ""
-
-    table_map = {
-        "analysis": f"{prefix}InvestingAssistant-AnalysisResults",
-        "processed_docs": f"{prefix}InvestingAssistant-ProcessedDocuments",
-        "job_runs": f"{prefix}InvestingAssistant-JobRuns",
+    # CDK sets these env vars with the actual table names
+    env_var_map = {
+        "analysis": "ANALYSIS_TABLE",
+        "processed_docs": "PROCESSED_DOCS_TABLE",
+        "job_runs": "JOB_RUNS_TABLE",
     }
 
-    if table_key not in table_map:
-        raise ValueError(f"Unknown table key: {table_key}. Valid: {list(table_map.keys())}")
+    if table_key not in env_var_map:
+        raise ValueError(f"Unknown table key: {table_key}. Valid: {list(env_var_map.keys())}")
 
+    # Prefer the env var (set by CDK in Lambda)
+    env_value = os.environ.get(env_var_map[table_key])
+    if env_value:
+        return env_value
+
+    # Fallback for local development
+    table_map = {
+        "analysis": "InvestingAssistant-AnalysisResults",
+        "processed_docs": "InvestingAssistant-ProcessedDocuments",
+        "job_runs": "InvestingAssistant-JobRuns",
+    }
     return table_map[table_key]
+

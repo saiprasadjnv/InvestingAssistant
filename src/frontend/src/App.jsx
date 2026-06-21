@@ -70,7 +70,7 @@ export default function App() {
         return <JobRunsView />;
       case 'Dashboard':
       default:
-        return <Dashboard onSelectCompany={handleCompanySelect} />;
+        return <Dashboard onSelectCompany={handleCompanySelect} onNavigate={handleNavClick} />;
     }
   };
 

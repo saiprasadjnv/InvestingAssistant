@@ -66,6 +66,21 @@ def get_dashboard_summary(user: dict = Depends(get_current_user)) -> dict[str, A
     impact_scores: list[float] = []
     company_summaries: list[dict] = []
 
+    # Pre-fetch recent job runs for per-company status
+    try:
+        recent_runs = dynamo.get_recent_job_runs(limit=50)
+    except Exception:
+        recent_runs = []
+
+    def _latest_run_for_ticker(ticker: str) -> dict | None:
+        """Find the most recent job run that includes this ticker."""
+        ticker_upper = ticker.upper()
+        for run in recent_runs:  # Already sorted by started_at desc
+            run_tickers = [t.upper() for t in run.get("tickers", [])]
+            if ticker_upper in run_tickers:
+                return run
+        return None
+
     for company in companies:
         ticker = company["ticker"]
         name = company["name"]
@@ -82,6 +97,7 @@ def get_dashboard_summary(user: dict = Depends(get_current_user)) -> dict[str, A
                     impact_scores.append(score)
 
             latest = analyses[0] if analyses else {}
+            latest_run = _latest_run_for_ticker(ticker)
             company_summaries.append({
                 "ticker": ticker,
                 "name": name,
@@ -89,6 +105,9 @@ def get_dashboard_summary(user: dict = Depends(get_current_user)) -> dict[str, A
                 "analysis_count": len(analyses),
                 "latest_sentiment": latest.get("sentiment"),
                 "latest_impact_score": latest.get("impact_score"),
+                "latest_run_status": latest_run.get("status") if latest_run else None,
+                "latest_run_at": latest_run.get("started_at") if latest_run else None,
+                "latest_run_id": latest_run.get("run_id") if latest_run else None,
             })
         except Exception as exc:
             logger.error("Failed to get analyses for %s: %s", ticker, exc)
@@ -99,6 +118,9 @@ def get_dashboard_summary(user: dict = Depends(get_current_user)) -> dict[str, A
                 "analysis_count": 0,
                 "latest_sentiment": None,
                 "latest_impact_score": None,
+                "latest_run_status": None,
+                "latest_run_at": None,
+                "latest_run_id": None,
             })
 
     avg_impact = sum(impact_scores) / len(impact_scores) if impact_scores else 0.0

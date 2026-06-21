@@ -8,7 +8,7 @@ import CompanyCard from './CompanyCard';
 import FindingsList from './FindingsList';
 import JobRunInfo from './JobRunInfo';
 
-export default function Dashboard({ onSelectCompany }) {
+export default function Dashboard({ onSelectCompany, onNavigate }) {
   const { data: summary, loading: summaryLoading } = useDashboardSummary();
   const { data: topData } = useTopFindings(10);
   const { data: jobData } = useJobRuns(10);
@@ -170,6 +170,27 @@ export default function Dashboard({ onSelectCompany }) {
       <section className="section">
         <div className="section__header">
           <h2 className="section__title">🏢 Tracked Companies</h2>
+          <button
+            onClick={() => onNavigate?.('Companies')}
+            style={{
+              background: 'linear-gradient(135deg, var(--accent-blue), var(--accent-purple, #7c5cfc))',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '8px',
+              padding: '8px 16px',
+              fontWeight: 600,
+              fontSize: '0.85rem',
+              cursor: 'pointer',
+              transition: 'opacity 0.2s',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.opacity = '0.85'; }}
+            onMouseLeave={e => { e.currentTarget.style.opacity = '1'; }}
+          >
+            + Add Company
+          </button>
         </div>
         <div className="grid-3">
           {(summary?.companies || []).map((c) => (

@@ -64,9 +64,9 @@ export function useApi(endpoint, options = {}) {
   return { data, loading, error, refetch: fetchData };
 }
 
-/** Dashboard summary */
+/** Dashboard summary — polls every 10s for run status updates */
 export function useDashboardSummary() {
-  return useApi('/dashboard/summary');
+  return useApi('/dashboard/summary', { refreshInterval: 10000 });
 }
 
 /** Top findings */

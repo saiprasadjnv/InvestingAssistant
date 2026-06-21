@@ -15,6 +15,16 @@ from typing import Optional
 
 from .models import Company
 
+# Load .env file so API keys are available via os.environ
+# (override=False means explicit env vars take precedence over .env)
+try:
+    from dotenv import load_dotenv
+    _env_path = Path(__file__).resolve().parent.parent.parent / ".env"
+    if _env_path.exists():
+        load_dotenv(_env_path, override=False)
+except ImportError:
+    pass  # python-dotenv not installed; rely on real env vars
+
 
 # ---------------------------------------------------------------------------
 # Paths

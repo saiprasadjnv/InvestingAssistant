@@ -368,6 +368,37 @@ class DynamoStorage:
             logger.error(f"Failed to get job runs: {e}")
             raise
 
+    def put_job_logs(self, run_id: str, entries: list[dict]) -> None:
+        """Store log entries for a job run as a separate item."""
+        item = {
+            "PK": f"RUN#{run_id}",
+            "SK": "LOGS",
+            "run_id": run_id,
+            "entries": entries,
+            "entry_count": len(entries),
+            "updated_at": _utcnow().isoformat(),
+        }
+        try:
+            self._job_runs_table.put_item(Item=_float_to_decimal(item))
+            logger.info(f"Stored {len(entries)} log entries for run {run_id}")
+        except ClientError as e:
+            logger.error(f"Failed to store job logs: {e}")
+            raise
+
+    def get_job_logs(self, run_id: str) -> list[dict]:
+        """Get log entries for a specific job run."""
+        try:
+            response = self._job_runs_table.get_item(
+                Key={"PK": f"RUN#{run_id}", "SK": "LOGS"}
+            )
+            item = response.get("Item")
+            if item is None:
+                return []
+            return _decimal_to_float(item.get("entries", []))
+        except ClientError as e:
+            logger.error(f"Failed to get job logs for {run_id}: {e}")
+            raise
+
     # -- Per-user Company Lists ---------------------------------------------
 
     def get_user_companies(self, username: str) -> list[dict] | None:
@@ -606,8 +637,33 @@ class LocalDynamoStorage:
 
     def get_recent_job_runs(self, limit: int = 20) -> list[dict]:
         items = self._load(self._job_runs_file)
+        # Only return SUMMARY items, not LOGS
+        items = [i for i in items if i.get("SK") == "SUMMARY" or i.get("SK") is None]
         items.sort(key=lambda x: x.get("started_at", ""), reverse=True)
         return items[:limit]
+
+    def put_job_logs(self, run_id: str, entries: list[dict]) -> None:
+        """Store log entries for a job run."""
+        items = self._load(self._job_runs_file)
+        # Remove existing logs for this run
+        items = [i for i in items if not (i.get("PK") == f"RUN#{run_id}" and i.get("SK") == "LOGS")]
+        items.append({
+            "PK": f"RUN#{run_id}",
+            "SK": "LOGS",
+            "run_id": run_id,
+            "entries": entries,
+            "entry_count": len(entries),
+            "updated_at": _utcnow().isoformat(),
+        })
+        self._save(self._job_runs_file, items)
+
+    def get_job_logs(self, run_id: str) -> list[dict]:
+        """Get log entries for a specific job run."""
+        items = self._load(self._job_runs_file)
+        for item in items:
+            if item.get("PK") == f"RUN#{run_id}" and item.get("SK") == "LOGS":
+                return item.get("entries", [])
+        return []
 
     # -- Per-user Company Lists ---------------------------------------------
 

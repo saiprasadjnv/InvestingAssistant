@@ -73,3 +73,20 @@ def get_job_run(run_id: str) -> dict[str, Any]:
     except Exception as exc:
         logger.error("Failed to get job run %s: %s", run_id, exc)
         raise HTTPException(status_code=500, detail="Failed to fetch job run")
+
+
+@router.get("/job-runs/{run_id}/logs")
+def get_job_run_logs(run_id: str) -> dict[str, Any]:
+    """Get log entries for a specific job run."""
+    dynamo = _get_dynamo()
+
+    try:
+        entries = dynamo.get_job_logs(run_id)
+        return {
+            "run_id": run_id,
+            "entry_count": len(entries),
+            "entries": entries,
+        }
+    except Exception as exc:
+        logger.error("Failed to get logs for %s: %s", run_id, exc)
+        raise HTTPException(status_code=500, detail="Failed to fetch job logs")

@@ -104,35 +104,71 @@ def _start_step_functions(companies: list[dict], triggered_by: str, arn: str, ru
 def _run_local_pipeline(companies: list[dict], triggered_by: str, run_id: str) -> str:
     """Run scrapers directly in a background thread (local mode)."""
     import threading
+    import time
 
     def _run():
+        from src.shared.job_logger import JobLogger, Stage
+
+        dynamo = _get_dynamo()
+        jlog = JobLogger(run_id, storage=dynamo)
+        jlog.info(Stage.INIT, f"Pipeline started for {len(companies)} companies",
+                  triggered_by=triggered_by, tickers=[c.get('ticker') for c in companies])
+
         event = {"companies": companies, "triggered_by": triggered_by, "manual": True, "run_id": run_id}
         docs_scraped = 0
         errors = []
-        logger.info("Local pipeline started (run_id=%s) for %d companies", run_id, len(companies))
 
+        # --- SEC Scraper ---
+        jlog.stage_start(Stage.SEC_SCRAPER, len(companies))
+        t0 = time.time()
         try:
             from src.scrapers.sec_agent.handler import handler as sec_handler
-            result = sec_handler(event, None)
-            docs_scraped += len(result.get("s3_keys", []))
-            logger.info("SEC scraper complete: %s", result)
+            for company in companies:
+                ticker = company.get('ticker', '?')
+                jlog.company_start(Stage.SEC_SCRAPER, ticker)
+                try:
+                    result = sec_handler({"companies": [company], **event}, None)
+                    found = len(result.get("s3_keys", []))
+                    docs_scraped += found
+                    jlog.company_done(Stage.SEC_SCRAPER, ticker, new_docs=found)
+                except Exception as exc:
+                    jlog.company_error(Stage.SEC_SCRAPER, ticker, exc)
+            jlog.stage_done(Stage.SEC_SCRAPER, docs_scraped, int((time.time() - t0) * 1000))
         except Exception as exc:
             errors.append(f"SEC: {str(exc)}")
-            logger.error("SEC scraper failed: %s", exc)
+            jlog.error(Stage.SEC_SCRAPER, "SEC scraper import/init failed", exc=exc)
 
+        # --- Company Info Scraper ---
+        info_docs = 0
+        jlog.stage_start(Stage.COMPANY_INFO, len(companies))
+        t0 = time.time()
         try:
             from src.scrapers.company_info_agent.handler import handler as info_handler
-            result = info_handler(event, None)
-            docs_scraped += len(result.get("s3_keys", []))
-            logger.info("Company info scraper complete: %s", result)
+            for company in companies:
+                ticker = company.get('ticker', '?')
+                jlog.company_start(Stage.COMPANY_INFO, ticker)
+                try:
+                    result = info_handler({"companies": [company], **event}, None)
+                    found = len(result.get("s3_keys", []))
+                    info_docs += found
+                    jlog.company_done(Stage.COMPANY_INFO, ticker, new_docs=found)
+                except Exception as exc:
+                    jlog.company_error(Stage.COMPANY_INFO, ticker, exc)
+            docs_scraped += info_docs
+            jlog.stage_done(Stage.COMPANY_INFO, info_docs, int((time.time() - t0) * 1000))
         except Exception as exc:
             errors.append(f"CompanyInfo: {str(exc)}")
-            logger.error("Company info scraper failed: %s", exc)
+            jlog.error(Stage.COMPANY_INFO, "Company info scraper import/init failed", exc=exc)
 
         # Update the job run with final results
         status = "FAILED" if errors and docs_scraped == 0 else "COMPLETED"
         _update_job_status(run_id, status, errors, docs_scraped)
-        logger.info("Local pipeline finished (run_id=%s) status=%s docs=%d", run_id, status, docs_scraped)
+
+        # Final flush — writes COMPLETE entry
+        jlog.flush()
+
+        logger.info("Local pipeline finished (run_id=%s) status=%s docs=%d logs=%d",
+                    run_id, status, docs_scraped, len(jlog.entries))
 
     thread = threading.Thread(target=_run, daemon=True)
     thread.start()

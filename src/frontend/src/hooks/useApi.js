@@ -18,11 +18,14 @@ export function useApi(endpoint, options = {}) {
 
   const { enabled = true, refreshInterval = null } = options;
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (isRefresh = false) => {
     if (!enabled) return;
     
     try {
-      setLoading(true);
+      // Only show loading on initial fetch, not background refreshes
+      if (!isRefresh) {
+        setLoading(true);
+      }
       setError(null);
 
       const token = localStorage.getItem('ia_token');
@@ -53,7 +56,7 @@ export function useApi(endpoint, options = {}) {
     fetchData();
 
     if (refreshInterval) {
-      const id = setInterval(fetchData, refreshInterval);
+      const id = setInterval(() => fetchData(true), refreshInterval);
       return () => clearInterval(id);
     }
   }, [fetchData, refreshInterval]);
@@ -93,11 +96,19 @@ export function useAnalysisHistory(ticker, limit = 100) {
   return useApi(`/analysis/${ticker}/history?limit=${limit}`, { enabled: !!ticker });
 }
 
-/** Job runs */
+/** Job runs — polls every 5s for status updates */
 export function useJobRuns(limit = 20, ticker = null) {
   const params = new URLSearchParams({ limit: limit.toString() });
   if (ticker) params.set('ticker', ticker);
-  return useApi(`/job-runs?${params.toString()}`);
+  return useApi(`/job-runs?${params.toString()}`, { refreshInterval: 5000 });
+}
+
+/** Job run logs — polls every 2s for streaming while expanded */
+export function useJobRunLogs(runId) {
+  return useApi(
+    runId ? `/job-runs/${runId}/logs` : null,
+    { enabled: !!runId, refreshInterval: runId ? 2000 : null },
+  );
 }
 
 /** Add a new company */

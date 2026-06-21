@@ -2,8 +2,8 @@
  * CompanyDetail — Detailed company findings page organized by source.
  * Shows SEC filings, Company News, X discussions, and Reddit (future).
  */
-import { useState } from 'react';
-import { useAnalysis, useCompanyDetail, useRunPipeline, useJobRuns } from '../hooks/useApi';
+import { useState, Fragment } from 'react';
+import { useAnalysis, useCompanyDetail, useRunPipeline, useJobRuns, useJobRunLogs } from '../hooks/useApi';
 import SentimentBadge from './SentimentBadge';
 import ConfidenceGauge from './ConfidenceGauge';
 
@@ -34,6 +34,9 @@ export default function CompanyDetail({ ticker, onBack }) {
   const { runSingle, loading: pipelineLoading, error: pipelineError, result: pipelineResult } = useRunPipeline();
   const { data: jobData, loading: jobsLoading } = useJobRuns(10, ticker);
   const runs = jobData?.runs || [];
+  const [expandedRunId, setExpandedRunId] = useState(null);
+  const { data: logData } = useJobRunLogs(expandedRunId);
+  const logEntries = logData?.entries || [];
 
   const results = analysisData?.results || [];
   const company = companyData || {};
@@ -218,9 +221,11 @@ export default function CompanyDetail({ ticker, onBack }) {
               </thead>
               <tbody>
                 {runs.map((run, i) => (
-                  <tr key={run.run_id || i} className="animate-in" style={{
+                  <Fragment key={run.run_id || i}>
+                  <tr className="animate-in" style={{
                     animationDelay: `${Math.min(i * 0.03, 0.3)}s`,
-                  }}>
+                    cursor: 'pointer',
+                  }} onClick={() => setExpandedRunId(expandedRunId === run.run_id ? null : run.run_id)}>
                     <td>
                       <span className="mono" style={{ color: 'var(--accent-blue)', fontSize: '0.813rem' }}>
                         {run.run_id || '—'}
@@ -262,6 +267,113 @@ export default function CompanyDetail({ ticker, onBack }) {
                       {run.triggered_by || 'scheduled'}
                     </td>
                   </tr>
+                  {expandedRunId === run.run_id && (
+                    <tr>
+                      <td colSpan={6} style={{ padding: 0 }}>
+                        <div style={{
+                          background: 'var(--bg-primary)',
+                          borderTop: '1px solid var(--border-subtle)',
+                          maxHeight: '400px',
+                          overflow: 'auto',
+                          padding: 'var(--space-md)',
+                        }}
+                        ref={el => {
+                          // Auto-scroll to bottom when new entries arrive
+                          if (el && run.status === 'RUNNING') {
+                            el.scrollTop = el.scrollHeight;
+                          }
+                        }}>
+                          {/* Streaming indicator */}
+                          {run.status === 'RUNNING' && (
+                            <div style={{
+                              display: 'flex', alignItems: 'center', gap: '6px',
+                              padding: '4px 8px', marginBottom: '8px',
+                              background: 'rgba(99,102,241,0.1)',
+                              border: '1px solid rgba(99,102,241,0.2)',
+                              borderRadius: '4px',
+                              fontSize: '0.75rem', color: '#818cf8',
+                            }}>
+                              <span style={{
+                                width: '6px', height: '6px', borderRadius: '50%',
+                                background: '#818cf8',
+                                animation: 'pulse 1.5s ease-in-out infinite',
+                              }} />
+                              Live — streaming logs every 2s
+                            </div>
+                          )}
+                          {logEntries.length === 0 ? (
+                            <div style={{ color: 'var(--text-muted)', fontSize: '0.813rem', textAlign: 'center', padding: 'var(--space-md)' }}>
+                              {run.status === 'RUNNING' ? 'Waiting for logs...' : 'No logs available for this run'}
+                            </div>
+                          ) : (
+                            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', lineHeight: 1.6 }}>
+                              {logEntries.map((entry, j) => (
+                                <div key={j} style={{
+                                  display: 'flex',
+                                  gap: '8px',
+                                  padding: '2px 0',
+                                  borderBottom: '1px solid var(--border-subtle)',
+                                  color: entry.level === 'ERROR' ? 'var(--negative)'
+                                       : entry.level === 'WARN' ? '#f59e0b'
+                                       : entry.level === 'DEBUG' ? 'var(--text-muted)'
+                                       : 'var(--text-secondary)',
+                                }}>
+                                  <span style={{ color: 'var(--text-muted)', minWidth: '75px', flexShrink: 0 }}>
+                                    {new Date(entry.ts).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                                  </span>
+                                  <span style={{
+                                    minWidth: '45px', flexShrink: 0, fontWeight: 600,
+                                    color: entry.level === 'ERROR' ? 'var(--negative)'
+                                         : entry.level === 'WARN' ? '#f59e0b'
+                                         : entry.level === 'INFO' ? 'var(--accent-blue)'
+                                         : 'var(--text-muted)',
+                                  }}>
+                                    {entry.level}
+                                  </span>
+                                  <span style={{
+                                    minWidth: '100px', flexShrink: 0,
+                                    color: 'var(--accent-purple)',
+                                  }}>
+                                    [{entry.stage}]
+                                  </span>
+                                  <span style={{ flex: 1 }}>
+                                    {entry.msg}
+                                    {entry.details && Object.keys(entry.details).length > 0 && !entry.details.traceback && (
+                                      <span style={{ color: 'var(--text-muted)', marginLeft: '8px' }}>
+                                        {Object.entries(entry.details).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(' ')}
+                                      </span>
+                                    )}
+                                  </span>
+                                </div>
+                              ))}
+                              {logEntries.some(e => e.details?.traceback) && (
+                                <details style={{ marginTop: '8px' }}>
+                                  <summary style={{ cursor: 'pointer', color: 'var(--negative)', fontSize: '0.75rem' }}>
+                                    Show error tracebacks
+                                  </summary>
+                                  {logEntries.filter(e => e.details?.traceback).map((e, j) => (
+                                    <pre key={j} style={{
+                                      background: 'rgba(239,68,68,0.1)',
+                                      border: '1px solid rgba(239,68,68,0.2)',
+                                      borderRadius: '4px',
+                                      padding: '8px',
+                                      margin: '4px 0',
+                                      whiteSpace: 'pre-wrap',
+                                      fontSize: '0.688rem',
+                                      color: 'var(--negative)',
+                                    }}>
+                                      {e.details.traceback}
+                                    </pre>
+                                  ))}
+                                </details>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>

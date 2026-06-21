@@ -1,5 +1,5 @@
 """
-Frontend Stack — S3 static hosting + CloudFront CDN.
+Frontend Stack — S3 static hosting + CloudFront CDN + Custom Domain.
 """
 
 from constructs import Construct
@@ -12,6 +12,9 @@ from aws_cdk import (
     aws_s3_deployment as s3deploy,
     aws_cloudfront as cloudfront,
     aws_cloudfront_origins as origins,
+    aws_certificatemanager as acm,
+    aws_route53 as route53,
+    aws_route53_targets as targets,
 )
 from pathlib import Path
 
@@ -27,6 +30,7 @@ class FrontendStack(Stack):
         construct_id: str,
         *,
         api_url: str,
+        domain_name: str = "",
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -42,6 +46,31 @@ class FrontendStack(Stack):
             auto_delete_objects=True,
             block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
         )
+
+        # ---------------------------------------------------------------
+        # Custom Domain — Route 53 + ACM (if domain_name provided)
+        # ---------------------------------------------------------------
+        certificate = None
+        domain_names = None
+        hosted_zone = None
+
+        if domain_name:
+            # Create a Route 53 public hosted zone for the domain
+            hosted_zone = route53.PublicHostedZone(
+                self, "HostedZone",
+                zone_name=domain_name,
+                comment=f"Hosted zone for {domain_name}",
+            )
+
+            # ACM certificate with DNS validation (must be in us-east-1 for CloudFront)
+            certificate = acm.Certificate(
+                self, "SiteCertificate",
+                domain_name=domain_name,
+                subject_alternative_names=[f"www.{domain_name}"],
+                validation=acm.CertificateValidation.from_dns(hosted_zone),
+            )
+
+            domain_names = [domain_name, f"www.{domain_name}"]
 
         # ---------------------------------------------------------------
         # CloudFront Distribution
@@ -61,6 +90,8 @@ class FrontendStack(Stack):
             self,
             "FrontendDistribution",
             comment="InvestingAssistant Dashboard",
+            domain_names=domain_names,
+            certificate=certificate,
             default_behavior=cloudfront.BehaviorOptions(
                 origin=origins.S3Origin(site_bucket, origin_access_identity=oai),
                 viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
@@ -94,6 +125,29 @@ class FrontendStack(Stack):
         )
 
         # ---------------------------------------------------------------
+        # DNS Records — point domain to CloudFront
+        # ---------------------------------------------------------------
+        if hosted_zone and domain_name:
+            # Root domain → CloudFront
+            route53.ARecord(
+                self, "SiteARecord",
+                zone=hosted_zone,
+                record_name=domain_name,
+                target=route53.RecordTarget.from_alias(
+                    targets.CloudFrontTarget(distribution)
+                ),
+            )
+            # www subdomain → CloudFront
+            route53.ARecord(
+                self, "WwwARecord",
+                zone=hosted_zone,
+                record_name=f"www.{domain_name}",
+                target=route53.RecordTarget.from_alias(
+                    targets.CloudFrontTarget(distribution)
+                ),
+            )
+
+        # ---------------------------------------------------------------
         # Deploy static files to S3
         # ---------------------------------------------------------------
         s3deploy.BucketDeployment(
@@ -114,3 +168,11 @@ class FrontendStack(Stack):
         cdk.CfnOutput(self, "DistributionId", value=distribution.distribution_id)
         cdk.CfnOutput(self, "FrontendBucketName", value=site_bucket.bucket_name)
         cdk.CfnOutput(self, "ApiUrl", value=api_url)
+
+        if domain_name:
+            cdk.CfnOutput(self, "CustomDomainUrl", value=f"https://{domain_name}")
+            cdk.CfnOutput(
+                self, "NameServers",
+                value=cdk.Fn.join(", ", hosted_zone.hosted_zone_name_servers),
+                description="Set these as your domain's nameservers at your registrar",
+            )

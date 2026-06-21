@@ -77,12 +77,14 @@ jobs:
             -c jwt_secret="$JWT_SECRET" \
             -c admin_username="$ADMIN_USERNAME" \
             -c admin_password="$ADMIN_PASSWORD" \
-            -c google_client_id="$GOOGLE_CLIENT_ID"
+            -c google_client_id="$GOOGLE_CLIENT_ID" \
+            -c domain_name="$DOMAIN_NAME"
         env:
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
           GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
+          DOMAIN_NAME: ${{ secrets.DOMAIN_NAME }}
 
       - name: Print deployment URLs
         run: |

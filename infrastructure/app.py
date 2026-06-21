@@ -59,10 +59,12 @@ api = ApiStack(
 api.add_dependency(storage)
 
 # 4. Frontend hosting
+domain_name = app.node.try_get_context("domain_name") or ""
 frontend = FrontendStack(
     app,
     "InvestingAssistant-Frontend",
     api_url=api.api_url,
+    domain_name=domain_name,
     env=env,
 )
 frontend.add_dependency(api)

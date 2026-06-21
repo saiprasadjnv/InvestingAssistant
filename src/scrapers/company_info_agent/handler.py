@@ -67,7 +67,7 @@ def _persist_documents(
     uploaded_keys: list[str] = []
 
     for doc in documents:
-        if dynamo.is_document_processed(source, doc.doc_id):
+        if dynamo.is_document_processed("SCRAPED", doc.doc_id):
             logger.debug("Document already processed — skipping: %s", doc.doc_id)
             continue
 
@@ -75,7 +75,7 @@ def _persist_documents(
             s3_key = s3.upload_document(doc)
             doc.s3_key = s3_key
             dynamo.mark_document_processed(
-                source,
+                "SCRAPED",
                 doc.doc_id,
                 metadata={
                     "ticker": doc.ticker,

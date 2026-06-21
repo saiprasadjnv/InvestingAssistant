@@ -297,12 +297,13 @@ class DynamoStorage:
 
     # -- Processed Documents (Deduplication) --------------------------------
 
-    def is_document_processed(self, source: DataSource, doc_id: str) -> bool:
+    def is_document_processed(self, source, doc_id: str) -> bool:
         """Check if a document has already been processed."""
+        source_val = source.value if hasattr(source, 'value') else str(source)
         try:
             response = self._processed_table.get_item(
                 Key={
-                    "PK": f"SOURCE#{source.value}",
+                    "PK": f"SOURCE#{source_val}",
                     "SK": f"DOC#{doc_id}",
                 }
             )
@@ -311,10 +312,11 @@ class DynamoStorage:
             logger.error(f"Failed to check processed status: {e}")
             return False
 
-    def mark_document_processed(self, source: DataSource, doc_id: str, metadata: dict = None) -> None:
+    def mark_document_processed(self, source, doc_id: str, metadata: dict = None) -> None:
         """Mark a document as processed to prevent reprocessing."""
+        source_val = source.value if hasattr(source, 'value') else str(source)
         item = {
-            "PK": f"SOURCE#{source.value}",
+            "PK": f"SOURCE#{source_val}",
             "SK": f"DOC#{doc_id}",
             "processed_at": _utcnow().isoformat(),
         }
@@ -629,15 +631,17 @@ class LocalDynamoStorage:
         for r in results:
             self.put_analysis_result(r)
 
-    def is_document_processed(self, source: DataSource, doc_id: str) -> bool:
+    def is_document_processed(self, source, doc_id: str) -> bool:
         items = self._load(self._processed_file)
-        pk = f"SOURCE#{source.value}"
+        source_val = source.value if hasattr(source, 'value') else str(source)
+        pk = f"SOURCE#{source_val}"
         sk = f"DOC#{doc_id}"
         return any(i.get("PK") == pk and i.get("SK") == sk for i in items)
 
-    def mark_document_processed(self, source: DataSource, doc_id: str, metadata: dict = None) -> None:
+    def mark_document_processed(self, source, doc_id: str, metadata: dict = None) -> None:
         items = self._load(self._processed_file)
-        item = {"PK": f"SOURCE#{source.value}", "SK": f"DOC#{doc_id}", "processed_at": _utcnow().isoformat()}
+        source_val = source.value if hasattr(source, 'value') else str(source)
+        item = {"PK": f"SOURCE#{source_val}", "SK": f"DOC#{doc_id}", "processed_at": _utcnow().isoformat()}
         if metadata:
             item["metadata"] = metadata
         items.append(item)

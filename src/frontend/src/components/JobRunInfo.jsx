@@ -3,12 +3,13 @@
  * Used on the Dashboard. Click a row to expand and stream logs.
  */
 import { useState, Fragment } from 'react';
-import { useJobRunLogs } from '../hooks/useApi';
+import { useJobRunLogs, useCancelJob } from '../hooks/useApi';
 
 export default function JobRunInfo({ runs = [] }) {
   const [expandedRunId, setExpandedRunId] = useState(null);
   const { data: logData } = useJobRunLogs(expandedRunId);
   const logEntries = logData?.entries || [];
+  const { cancelJob } = useCancelJob();
 
   if (!runs.length) {
     return (
@@ -93,6 +94,27 @@ export default function JobRunInfo({ runs = [] }) {
                     )}
                     {run.status}
                   </span>
+                  {run.status === 'RUNNING' && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); cancelJob(run.run_id); }}
+                      style={{
+                        background: 'none',
+                        border: '1px solid var(--negative)',
+                        color: 'var(--negative)',
+                        padding: '2px 8px',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '0.7rem',
+                        fontWeight: 600,
+                        marginLeft: '6px',
+                        transition: 'all 0.2s',
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.15)'; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
+                    >
+                      ■ Stop
+                    </button>
+                  )}
                 </td>
                 <td style={{ fontSize: '0.813rem', color: 'var(--text-secondary)' }}>
                   {run.started_at ? new Date(run.started_at).toLocaleString() : '—'}

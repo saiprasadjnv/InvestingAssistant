@@ -2,7 +2,7 @@
  * JobRunsView — Pipeline execution history with stats and details.
  */
 import { useState, Fragment } from 'react';
-import { useJobRuns, useJobRunLogs } from '../hooks/useApi';
+import { useJobRuns, useJobRunLogs, useCancelJob } from '../hooks/useApi';
 
 export default function JobRunsView() {
   const { data: jobData, loading } = useJobRuns(50);
@@ -10,6 +10,7 @@ export default function JobRunsView() {
   const [expandedRunId, setExpandedRunId] = useState(null);
   const { data: logData } = useJobRunLogs(expandedRunId);
   const logEntries = logData?.entries || [];
+  const { cancelJob } = useCancelJob();
 
   if (loading) {
     return (
@@ -124,6 +125,27 @@ export default function JobRunsView() {
                     }}>
                       {run.status || 'UNKNOWN'}
                     </span>
+                    {run.status === 'RUNNING' && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); cancelJob(run.run_id); }}
+                        style={{
+                          background: 'none',
+                          border: '1px solid var(--negative)',
+                          color: 'var(--negative)',
+                          padding: '2px 8px',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          fontSize: '0.7rem',
+                          fontWeight: 600,
+                          marginLeft: '6px',
+                          transition: 'all 0.2s',
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.15)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
+                      >
+                        ■ Stop
+                      </button>
+                    )}
                   </td>
                   <td style={{ fontSize: '0.813rem' }}>
                     {run.started_at

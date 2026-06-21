@@ -255,3 +255,30 @@ export function useRunPipeline() {
 
   return { runAll, runSingle, loading, error, result };
 }
+
+/** Cancel a running pipeline job */
+export function useCancelJob() {
+  const [loading, setLoading] = useState(false);
+  const cancelJob = async (runId) => {
+    setLoading(true);
+    try {
+      const token = localStorage.getItem('ia_token');
+      const res = await fetch(`${API_BASE}/pipeline/cancel/${runId}`, {
+        method: 'POST',
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+      });
+      if (res.status === 401) {
+        window.dispatchEvent(new Event('auth-expired'));
+        throw new Error('Session expired');
+      }
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      return await res.json();
+    } finally {
+      setLoading(false);
+    }
+  };
+  return { cancelJob, loading };
+}

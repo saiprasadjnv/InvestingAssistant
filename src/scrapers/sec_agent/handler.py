@@ -87,7 +87,7 @@ async def _process_company(
         doc_id = f"SEC_{company.ticker}_{accession_number}"
 
         # 2a. Check if already processed.
-        if dynamo.is_document_processed(DataSource.SEC, doc_id):
+        if dynamo.is_document_processed("SCRAPED", doc_id):
             logger.debug("Already processed: %s — skipping", doc_id)
             continue
 
@@ -144,7 +144,7 @@ async def _process_company(
         # 2e. Mark as processed in DynamoDB.
         try:
             dynamo.mark_document_processed(
-                source=DataSource.SEC,
+                source="SCRAPED",
                 doc_id=doc_id,
                 metadata={
                     "ticker": company.ticker,

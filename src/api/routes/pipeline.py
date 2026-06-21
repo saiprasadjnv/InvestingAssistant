@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import uuid
 from datetime import datetime, timezone
 
@@ -21,6 +22,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _dynamo = None
+
+# Registry of cancel events for running jobs
+_cancel_events: dict[str, threading.Event] = {}
 
 
 def _get_dynamo():
@@ -99,6 +103,9 @@ def _run_local_pipeline(companies: list[dict], triggered_by: str, run_id: str) -
     import threading
     import time
 
+    cancel_event = threading.Event()
+    _cancel_events[run_id] = cancel_event
+
     def _run():
         from src.shared.job_logger import JobLogger, Stage
 
@@ -113,6 +120,17 @@ def _run_local_pipeline(companies: list[dict], triggered_by: str, run_id: str) -
         errors = []
         all_s3_keys = []  # Collect S3 keys from all scraper stages
 
+        def _check_cancelled():
+            if cancel_event.is_set():
+                jlog.warn(Stage.INIT, "Pipeline cancelled by user")
+                _update_job_status(run_id, "CANCELLED", [], total_docs)
+                jlog.flush()
+                _cancel_events.pop(run_id, None)
+                return True
+            return False
+
+        if _check_cancelled(): return
+
         # --- SEC Scraper ---
         jlog.stage_start(Stage.SEC_SCRAPER, len(companies))
         sec_docs = 0
@@ -122,6 +140,7 @@ def _run_local_pipeline(companies: list[dict], triggered_by: str, run_id: str) -
             jlog.info(Stage.SEC_SCRAPER, "SEC scraper module loaded successfully")
 
             for company in companies:
+                if _check_cancelled(): return
                 ticker = company.get('ticker', '?')
                 jlog.company_start(Stage.SEC_SCRAPER, ticker)
                 ct = time.time()
@@ -161,6 +180,8 @@ def _run_local_pipeline(companies: list[dict], triggered_by: str, run_id: str) -
             errors.append(f"SEC: {str(exc)}")
             jlog.error(Stage.SEC_SCRAPER, "SEC scraper import/init failed", exc=exc)
 
+        if _check_cancelled(): return
+
         # --- Company Info Scraper ---
         jlog.stage_start(Stage.COMPANY_INFO, len(companies))
         info_docs = 0
@@ -170,6 +191,7 @@ def _run_local_pipeline(companies: list[dict], triggered_by: str, run_id: str) -
             jlog.info(Stage.COMPANY_INFO, "Company info scraper module loaded successfully")
 
             for company in companies:
+                if _check_cancelled(): return
                 ticker = company.get('ticker', '?')
                 jlog.company_start(Stage.COMPANY_INFO, ticker)
                 ct = time.time()
@@ -212,6 +234,8 @@ def _run_local_pipeline(companies: list[dict], triggered_by: str, run_id: str) -
             errors.append(f"CompanyInfo: {str(exc)}")
             jlog.error(Stage.COMPANY_INFO, "Company info scraper import/init failed", exc=exc)
 
+        if _check_cancelled(): return
+
         # --- Sentiment Analysis ---
         jlog.stage_start(Stage.SENTIMENT, len(companies))
         analysis_results = 0
@@ -227,13 +251,27 @@ def _run_local_pipeline(companies: list[dict], triggered_by: str, run_id: str) -
             jlog.info(Stage.SENTIMENT, f"LLM analysis using {provider_name}/{model_id}",
                       provider=provider_name, model=model_id, fallback_chain=["openai/gpt-4o-mini", "anthropic/claude-3-5-haiku-latest"])
 
-            if not all_s3_keys:
-                jlog.info(Stage.SENTIMENT, "No scraped documents to analyze — skipping LLM analysis")
+            # Collect ALL documents for these tickers (not just new ones)
+            from src.shared.storage import create_file_storage
+            from src.shared.models import DataSource as DS
+            file_storage = create_file_storage()
+            all_docs_for_analysis = []
+            for company in companies:
+                ticker = company.get('ticker', '?')
+                for source in [DS.SEC, DS.INVESTOR_PAGE, DS.NEWS_PAGE]:
+                    try:
+                        docs = file_storage.list_documents(source, ticker)
+                        all_docs_for_analysis.extend(docs)
+                    except Exception:
+                        pass
+
+            if not all_docs_for_analysis:
+                jlog.info(Stage.SENTIMENT, "No documents found for analysis")
             else:
-                jlog.info(Stage.SENTIMENT, f"Analyzing {len(all_s3_keys)} documents")
+                jlog.info(Stage.SENTIMENT, f"Found {len(all_docs_for_analysis)} total documents, analyzing unprocessed ones")
                 ct = time.time()
                 try:
-                    result = sentiment_handler({"s3_keys": all_s3_keys, "primary_provider": primary_provider}, None)
+                    result = sentiment_handler({"s3_keys": all_docs_for_analysis, "primary_provider": primary_provider}, None)
                     processed = result.get("documents_processed", 0)
                     skipped = result.get("documents_skipped", 0)
                     llm_metrics = result.get("llm_metrics", [])
@@ -271,6 +309,8 @@ def _run_local_pipeline(companies: list[dict], triggered_by: str, run_id: str) -
         except Exception as exc:
             errors.append(f"Sentiment: {str(exc)}")
             jlog.error(Stage.SENTIMENT, "Sentiment analyzer import/init failed", exc=exc)
+
+        if _check_cancelled(): return
 
         # --- Impact Scoring ---
         jlog.stage_start(Stage.IMPACT_SCORER, len(companies))
@@ -325,6 +365,7 @@ def _run_local_pipeline(companies: list[dict], triggered_by: str, run_id: str) -
         except Exception:
             pass
         jlog.flush()
+        _cancel_events.pop(run_id, None)
 
         logger.info("Local pipeline finished (run_id=%s) status=%s docs=%d logs=%d",
                     run_id, status, total_docs, len(jlog.entries))
@@ -349,6 +390,32 @@ def _update_job_status(run_id: str, status: str, errors: list[str] = None, docs_
         dynamo.update_job_run(run_id, updates)
     except Exception as exc:
         logger.error("Failed to update job run %s: %s", run_id, exc)
+
+
+@router.post("/pipeline/cancel/{run_id}", response_model=RunResponse)
+def cancel_job(run_id: str, user: dict = Depends(get_current_user)):
+    """Cancel a running pipeline job."""
+    cancel_event = _cancel_events.get(run_id)
+    if not cancel_event:
+        # Check if the job exists at all
+        dynamo = _get_dynamo()
+        try:
+            runs = dynamo.get_recent_job_runs(limit=50)
+            job = next((r for r in runs if r.get("run_id") == run_id), None)
+            if job and job.get("status") != "RUNNING":
+                raise HTTPException(status_code=400, detail=f"Job {run_id} is not running (status: {job.get('status')})")
+        except HTTPException:
+            raise
+        except Exception:
+            pass
+        raise HTTPException(status_code=404, detail=f"No active job found with id {run_id}")
+
+    cancel_event.set()
+    return RunResponse(
+        status="cancelling",
+        message=f"Cancel signal sent to job {run_id}. It will stop after the current operation.",
+        execution_id=run_id,
+    )
 
 
 @router.post("/pipeline/run", response_model=RunResponse)

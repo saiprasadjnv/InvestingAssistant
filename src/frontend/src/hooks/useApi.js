@@ -169,3 +169,76 @@ export function useDeleteCompany() {
 
   return { deleteCompany, loading, error };
 }
+
+/** Trigger pipeline run for all companies */
+export function useRunPipeline() {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [result, setResult] = useState(null);
+
+  const runAll = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    setResult(null);
+    try {
+      const token = localStorage.getItem('ia_token');
+      const res = await fetch(`${API_BASE}/pipeline/run`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        },
+      });
+      if (res.status === 401) {
+        window.dispatchEvent(new Event('auth-expired'));
+        throw new Error('Session expired');
+      }
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      setResult(data);
+      return data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const runSingle = useCallback(async (ticker) => {
+    setLoading(true);
+    setError(null);
+    setResult(null);
+    try {
+      const token = localStorage.getItem('ia_token');
+      const res = await fetch(`${API_BASE}/pipeline/run/${ticker}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        },
+      });
+      if (res.status === 401) {
+        window.dispatchEvent(new Event('auth-expired'));
+        throw new Error('Session expired');
+      }
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      setResult(data);
+      return data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  return { runAll, runSingle, loading, error, result };
+}

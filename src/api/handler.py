@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from mangum import Mangum
 
 from .auth import auth_router, get_current_user
-from .routes import analysis, companies, dashboard, job_runs
+from .routes import analysis, companies, dashboard, job_runs, pipeline
 
 app = FastAPI(
     title="InvestingAssistant API",
@@ -34,6 +34,7 @@ app.include_router(companies.router, prefix="/api", tags=["Companies"], dependen
 app.include_router(analysis.router, prefix="/api", tags=["Analysis"], dependencies=[Depends(get_current_user)])
 app.include_router(dashboard.router, prefix="/api", tags=["Dashboard"], dependencies=[Depends(get_current_user)])
 app.include_router(job_runs.router, prefix="/api", tags=["Job Runs"], dependencies=[Depends(get_current_user)])
+app.include_router(pipeline.router, prefix="/api", tags=["Pipeline"], dependencies=[Depends(get_current_user)])
 
 
 @app.get("/", tags=["Health"])

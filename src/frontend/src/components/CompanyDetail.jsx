@@ -3,7 +3,7 @@
  * Shows SEC filings, Company News, X discussions, and Reddit (future).
  */
 import { useState } from 'react';
-import { useAnalysis, useCompanyDetail } from '../hooks/useApi';
+import { useAnalysis, useCompanyDetail, useRunPipeline } from '../hooks/useApi';
 import SentimentBadge from './SentimentBadge';
 import ConfidenceGauge from './ConfidenceGauge';
 
@@ -31,6 +31,7 @@ export default function CompanyDetail({ ticker, onBack }) {
     ticker,
     activeSource === 'ALL' ? null : activeSource
   );
+  const { runSingle, loading: pipelineLoading, error: pipelineError, result: pipelineResult } = useRunPipeline();
 
   const results = analysisData?.results || [];
   const company = companyData || {};
@@ -48,7 +49,55 @@ export default function CompanyDetail({ ticker, onBack }) {
             {company.latest_sentiment && (
               <SentimentBadge sentiment={company.latest_sentiment} />
             )}
+            <button
+              onClick={() => runSingle(ticker)}
+              disabled={pipelineLoading}
+              style={{
+                background: pipelineLoading ? 'rgba(5,150,105,0.3)' : 'linear-gradient(135deg, #059669, #10b981)',
+                color: 'white',
+                border: 'none',
+                padding: '8px 16px',
+                borderRadius: '8px',
+                cursor: pipelineLoading ? 'wait' : 'pointer',
+                fontWeight: 600,
+                fontSize: '0.85rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                marginLeft: 'auto',
+                transition: 'all 0.2s',
+                opacity: pipelineLoading ? 0.7 : 1,
+              }}
+            >
+              {pipelineLoading ? '⏳ Running...' : `▶ Run Analysis`}
+            </button>
           </div>
+          {pipelineResult && (
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(5,150,105,0.15), rgba(16,185,129,0.1))',
+              border: '1px solid rgba(16,185,129,0.3)',
+              borderRadius: '6px',
+              padding: '8px 12px',
+              marginTop: '8px',
+              color: '#10b981',
+              fontSize: '0.85rem',
+            }}>
+              ✓ {pipelineResult.message}
+            </div>
+          )}
+          {pipelineError && (
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(239,68,68,0.15), rgba(239,68,68,0.1))',
+              border: '1px solid rgba(239,68,68,0.3)',
+              borderRadius: '6px',
+              padding: '8px 12px',
+              marginTop: '8px',
+              color: '#ef4444',
+              fontSize: '0.85rem',
+            }}>
+              ✗ {pipelineError}
+            </div>
+          )}
           <div className="company-detail__name">{company.name || ticker}</div>
           <div className="company-detail__meta">
             <span className="pill" style={{

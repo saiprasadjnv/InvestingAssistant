@@ -247,6 +247,10 @@ class PipelineStack(Stack):
             tracing_enabled=True,
         )
 
+        # Export for cross-stack reference
+        self.state_machine_arn = state_machine.state_machine_arn
+        self.state_machine = state_machine
+
         # ---------------------------------------------------------------
         # EventBridge Scheduler — every 12 hours
         # ---------------------------------------------------------------

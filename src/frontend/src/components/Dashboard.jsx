@@ -2,7 +2,7 @@
  * Dashboard — Main dashboard view with stat cards, top findings, and company grid.
  */
 import { useState } from 'react';
-import { useDashboardSummary, useTopFindings, useAnalysis, useJobRuns } from '../hooks/useApi';
+import { useDashboardSummary, useTopFindings, useAnalysis, useJobRuns, useRunPipeline } from '../hooks/useApi';
 import TopFindings from './TopFindings';
 import CompanyCard from './CompanyCard';
 import FindingsList from './FindingsList';
@@ -12,6 +12,7 @@ export default function Dashboard({ onSelectCompany }) {
   const { data: summary, loading: summaryLoading } = useDashboardSummary();
   const { data: topData } = useTopFindings(10);
   const { data: jobData } = useJobRuns(10);
+  const { runAll, loading: pipelineLoading, error: pipelineError, result: pipelineResult } = useRunPipeline();
   const [selectedTicker, setSelectedTicker] = useState(null);
   const { data: analysisData } = useAnalysis(selectedTicker);
 
@@ -28,8 +29,66 @@ export default function Dashboard({ onSelectCompany }) {
 
   return (
     <>
-      {/* Stat Cards */}
+      {/* Pipeline notification */}
+      {pipelineResult && (
+        <div style={{
+          background: 'linear-gradient(135deg, rgba(5,150,105,0.15), rgba(16,185,129,0.1))',
+          border: '1px solid rgba(16,185,129,0.3)',
+          borderRadius: '8px',
+          padding: '12px 16px',
+          margin: '0 0 16px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          color: '#10b981',
+          fontSize: '0.9rem',
+        }}>
+          ✓ {pipelineResult.message}
+        </div>
+      )}
+      {pipelineError && (
+        <div style={{
+          background: 'linear-gradient(135deg, rgba(239,68,68,0.15), rgba(239,68,68,0.1))',
+          border: '1px solid rgba(239,68,68,0.3)',
+          borderRadius: '8px',
+          padding: '12px 16px',
+          margin: '0 0 16px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          color: '#ef4444',
+          fontSize: '0.9rem',
+        }}>
+          ✗ {pipelineError}
+        </div>
+      )}
+
+      {/* Stat Cards Header with Run Analysis button */}
       <section className="section">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <h2 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--text-primary)' }}>Overview</h2>
+          <button
+            onClick={runAll}
+            disabled={pipelineLoading}
+            style={{
+              background: pipelineLoading ? 'rgba(5,150,105,0.3)' : 'linear-gradient(135deg, #059669, #10b981)',
+              color: 'white',
+              border: 'none',
+              padding: '10px 20px',
+              borderRadius: '8px',
+              cursor: pipelineLoading ? 'wait' : 'pointer',
+              fontWeight: 600,
+              fontSize: '0.9rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              transition: 'all 0.2s',
+              opacity: pipelineLoading ? 0.7 : 1,
+            }}
+          >
+            {pipelineLoading ? '⏳ Running...' : '▶ Run Analysis (All Companies)'}
+          </button>
+        </div>
         <div className="grid-4">
           <div className="card stat-card--blue animate-in animate-in-delay-1">
             <div className="card__header">

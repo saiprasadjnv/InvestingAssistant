@@ -54,9 +54,11 @@ api = ApiStack(
     processed_docs_table=storage.processed_docs_table,
     job_runs_table=storage.job_runs_table,
     raw_bucket=storage.raw_bucket,
+    state_machine_arn=pipeline.state_machine_arn,
     env=env,
 )
 api.add_dependency(storage)
+api.add_dependency(pipeline)  # Add dependency since we reference pipeline output
 
 # 4. Frontend hosting
 domain_name = app.node.try_get_context("domain_name") or ""

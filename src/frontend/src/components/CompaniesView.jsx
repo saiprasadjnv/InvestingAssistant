@@ -3,7 +3,7 @@
  * add company modal, and delete company support.
  */
 import { useState, useMemo } from 'react';
-import { useDashboardSummary, useAddCompany, useDeleteCompany } from '../hooks/useApi';
+import { useDashboardSummary, useAddCompany, useDeleteCompany, useRunPipeline } from '../hooks/useApi';
 import SentimentBadge from './SentimentBadge';
 
 /* ---- inline styles for the modal ---- */
@@ -103,6 +103,7 @@ export default function CompaniesView({ onSelectCompany }) {
   const { data: summary, loading, refetch } = useDashboardSummary();
   const { addCompany, loading: adding, error: addError } = useAddCompany();
   const { deleteCompany, loading: deleting } = useDeleteCompany();
+  const { runAll, runSingle, loading: runningPipeline, error: pipelineError, result: pipelineResult } = useRunPipeline();
 
   /* --- local UI state --- */
   const [search, setSearch] = useState('');
@@ -111,6 +112,7 @@ export default function CompaniesView({ onSelectCompany }) {
   const [form, setForm] = useState(EMPTY_FORM);
   const [formError, setFormError] = useState(null);
   const [deletingTicker, setDeletingTicker] = useState(null);
+  const [runningTicker, setRunningTicker] = useState(null);
 
   const companies = summary?.companies || [];
 
@@ -179,6 +181,26 @@ export default function CompaniesView({ onSelectCompany }) {
     }
   };
 
+  const handleRunAll = async () => {
+    try {
+      await runAll();
+    } catch (err) {
+      // error is captured in pipelineError
+    }
+  };
+
+  const handleRunSingle = async (ticker, e) => {
+    e.stopPropagation();
+    try {
+      setRunningTicker(ticker);
+      await runSingle(ticker);
+    } catch (err) {
+      // error is captured in pipelineError
+    } finally {
+      setRunningTicker(null);
+    }
+  };
+
   /* --- render --- */
   if (loading) {
     return (
@@ -191,6 +213,40 @@ export default function CompaniesView({ onSelectCompany }) {
 
   return (
     <section className="section animate-in">
+      {/* Pipeline result notification */}
+      {pipelineResult && (
+        <div style={{
+          background: 'linear-gradient(135deg, rgba(5,150,105,0.15), rgba(16,185,129,0.1))',
+          border: '1px solid rgba(16,185,129,0.3)',
+          borderRadius: '8px',
+          padding: '12px 16px',
+          marginBottom: '16px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          color: '#10b981',
+          fontSize: '0.9rem',
+        }}>
+          ✓ {pipelineResult.message}
+        </div>
+      )}
+      {pipelineError && (
+        <div style={{
+          background: 'rgba(255,80,80,0.1)',
+          border: '1px solid rgba(255,80,80,0.3)',
+          borderRadius: '8px',
+          padding: '12px 16px',
+          marginBottom: '16px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          color: '#ff5050',
+          fontSize: '0.9rem',
+        }}>
+          ✕ {pipelineError}
+        </div>
+      )}
+
       <div className="section__header" style={{ flexWrap: 'wrap', gap: 'var(--space-md)' }}>
         <h2 className="section__title">🏢 Tracked Companies ({filtered.length})</h2>
         <div style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -212,6 +268,36 @@ export default function CompaniesView({ onSelectCompany }) {
               <option key={s} value={s}>{s === 'ALL' ? 'All Sectors' : s}</option>
             ))}
           </select>
+          {/* Run Analysis (All) button */}
+          <button
+            id="run-all-btn"
+            style={{
+              background: 'linear-gradient(135deg, #059669, #10b981)',
+              color: 'white',
+              border: 'none',
+              padding: '10px 20px',
+              borderRadius: '8px',
+              cursor: runningPipeline ? 'wait' : 'pointer',
+              fontWeight: 600,
+              fontSize: '0.9rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              opacity: runningPipeline ? 0.6 : 1,
+              transition: 'opacity 0.2s',
+            }}
+            disabled={runningPipeline}
+            onClick={handleRunAll}
+          >
+            {runningPipeline ? (
+              <>
+                <span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} />
+                Running…
+              </>
+            ) : (
+              '▶ Run Analysis (All)'
+            )}
+          </button>
           {/* Add Company button */}
           <button
             id="add-company-btn"
@@ -235,6 +321,7 @@ export default function CompaniesView({ onSelectCompany }) {
               <th style={{ textAlign: 'center' }}>Sentiment</th>
               <th style={{ textAlign: 'center' }}>Impact</th>
               <th></th>
+              <th style={{ width: 48 }}></th>
               <th style={{ width: 48 }}></th>
             </tr>
           </thead>
@@ -300,6 +387,30 @@ export default function CompaniesView({ onSelectCompany }) {
                   }}>
                     View →
                   </span>
+                </td>
+                <td style={{ textAlign: 'center' }}>
+                  <button
+                    title={`Run analysis for ${c.ticker}`}
+                    style={{
+                      background: 'none',
+                      border: '1px solid #059669',
+                      color: '#10b981',
+                      padding: '4px 8px',
+                      borderRadius: '6px',
+                      cursor: runningTicker === c.ticker ? 'wait' : 'pointer',
+                      fontSize: '0.8rem',
+                      transition: 'all 0.2s',
+                      opacity: runningTicker === c.ticker ? 0.4 : 1,
+                      pointerEvents: runningTicker === c.ticker ? 'none' : 'auto',
+                      lineHeight: 1,
+                    }}
+                    disabled={runningTicker === c.ticker}
+                    onClick={(e) => handleRunSingle(c.ticker, e)}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(5,150,105,0.15)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
+                  >
+                    ▶
+                  </button>
                 </td>
                 <td style={{ textAlign: 'center' }}>
                   <button

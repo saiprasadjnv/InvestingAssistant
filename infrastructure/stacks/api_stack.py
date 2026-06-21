@@ -13,6 +13,8 @@ from aws_cdk import (
     aws_apigatewayv2_integrations as apigwv2_integrations,
     aws_s3 as s3,
     aws_dynamodb as dynamodb,
+    aws_iam as iam,
+    aws_stepfunctions as sfn,
 )
 
 PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent)
@@ -30,6 +32,7 @@ class ApiStack(Stack):
         processed_docs_table: dynamodb.ITable,
         job_runs_table: dynamodb.ITable,
         raw_bucket: s3.IBucket,
+        state_machine_arn: str = "",
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -85,6 +88,7 @@ class ApiStack(Stack):
                 "ADMIN_USERNAME": admin_username,
                 "ADMIN_PASSWORD": admin_password,
                 "VITE_GOOGLE_CLIENT_ID": google_client_id,
+                "STATE_MACHINE_ARN": state_machine_arn,
             },
             tracing=_lambda.Tracing.ACTIVE,
         )
@@ -94,6 +98,16 @@ class ApiStack(Stack):
         processed_docs_table.grant_read_write_data(api_lambda)
         job_runs_table.grant_read_data(api_lambda)
         raw_bucket.grant_read(api_lambda)
+
+        # Grant API Lambda permission to trigger the pipeline
+        if state_machine_arn:
+            api_lambda.add_to_role_policy(
+                iam.PolicyStatement(
+                    effect=iam.Effect.ALLOW,
+                    actions=["states:StartExecution"],
+                    resources=[state_machine_arn],
+                )
+            )
 
         # ---------------------------------------------------------------
         # API Gateway HTTP API

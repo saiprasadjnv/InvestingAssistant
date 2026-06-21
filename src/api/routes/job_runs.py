@@ -27,6 +27,7 @@ def _get_dynamo():
 @router.get("/job-runs")
 def list_job_runs(
     limit: int = Query(20, ge=1, le=100),
+    ticker: Optional[str] = Query(None, description="Filter by company ticker"),
 ) -> dict[str, Any]:
     """Recent pipeline execution history with LLM cost breakdown."""
     dynamo = _get_dynamo()
@@ -36,6 +37,11 @@ def list_job_runs(
     except Exception as exc:
         logger.error("Failed to get job runs: %s", exc)
         raise HTTPException(status_code=500, detail="Failed to fetch job runs")
+
+    # Filter by ticker if specified
+    if ticker:
+        ticker_upper = ticker.upper()
+        runs = [r for r in runs if ticker_upper in [t.upper() for t in r.get("tickers", [])]]
 
     # Compute aggregate cost stats
     total_cost = sum(r.get("total_cost_usd", 0.0) for r in runs)

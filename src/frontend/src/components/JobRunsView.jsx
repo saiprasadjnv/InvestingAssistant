@@ -76,6 +76,7 @@ export default function JobRunsView() {
             <thead>
               <tr>
                 <th>Run ID</th>
+                <th>Trigger</th>
                 <th>Status</th>
                 <th>Started</th>
                 <th style={{ textAlign: 'center' }}>Companies</th>
@@ -92,6 +93,15 @@ export default function JobRunsView() {
                   <td>
                     <span className="mono" style={{ color: 'var(--accent-blue)' }}>
                       {run.run_id ? run.run_id.substring(0, 16) : '—'}
+                    </span>
+                  </td>
+                  <td style={{ fontSize: '0.813rem' }}>
+                    <span className="pill" style={{
+                      background: run.trigger_type === 'manual' ? 'rgba(99,102,241,0.15)' : 'var(--bg-input)',
+                      color: run.trigger_type === 'manual' ? '#818cf8' : 'var(--text-muted)',
+                      border: `1px solid ${run.trigger_type === 'manual' ? 'rgba(99,102,241,0.3)' : 'var(--border-subtle)'}`,
+                    }}>
+                      {run.trigger_type === 'manual' ? '🖱️ Manual' : '⏰ Scheduled'}
                     </span>
                   </td>
                   <td>
@@ -116,8 +126,26 @@ export default function JobRunsView() {
                         })
                       : '—'}
                   </td>
-                  <td className="mono" style={{ textAlign: 'center' }}>
-                    {run.companies_processed || 0}
+                  <td style={{ textAlign: 'center' }}>
+                    {run.tickers && run.tickers.length > 0 ? (
+                      <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', justifyContent: 'center' }}>
+                        {run.tickers.slice(0, 3).map(t => (
+                          <span key={t} className="pill" style={{
+                            background: 'var(--bg-input)',
+                            color: 'var(--accent-blue)',
+                            border: '1px solid var(--border-subtle)',
+                            fontSize: '0.625rem',
+                          }}>{t}</span>
+                        ))}
+                        {run.tickers.length > 3 && (
+                          <span style={{ fontSize: '0.625rem', color: 'var(--text-muted)' }}>
+                            +{run.tickers.length - 3}
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="mono">{run.companies_processed || 0}</span>
+                    )}
                   </td>
                   <td className="mono" style={{ textAlign: 'center' }}>
                     {run.documents_scraped || 0}

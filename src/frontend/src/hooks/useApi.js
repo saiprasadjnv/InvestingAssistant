@@ -94,8 +94,10 @@ export function useAnalysisHistory(ticker, limit = 100) {
 }
 
 /** Job runs */
-export function useJobRuns(limit = 20) {
-  return useApi(`/job-runs?limit=${limit}`);
+export function useJobRuns(limit = 20, ticker = null) {
+  const params = new URLSearchParams({ limit: limit.toString() });
+  if (ticker) params.set('ticker', ticker);
+  return useApi(`/job-runs?${params.toString()}`);
 }
 
 /** Add a new company */

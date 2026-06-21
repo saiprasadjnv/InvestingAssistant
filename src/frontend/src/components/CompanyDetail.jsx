@@ -3,7 +3,7 @@
  * Shows SEC filings, Company News, X discussions, and Reddit (future).
  */
 import { useState } from 'react';
-import { useAnalysis, useCompanyDetail, useRunPipeline } from '../hooks/useApi';
+import { useAnalysis, useCompanyDetail, useRunPipeline, useJobRuns } from '../hooks/useApi';
 import SentimentBadge from './SentimentBadge';
 import ConfidenceGauge from './ConfidenceGauge';
 
@@ -32,6 +32,8 @@ export default function CompanyDetail({ ticker, onBack }) {
     activeSource === 'ALL' ? null : activeSource
   );
   const { runSingle, loading: pipelineLoading, error: pipelineError, result: pipelineResult } = useRunPipeline();
+  const { data: jobData, loading: jobsLoading } = useJobRuns(10, ticker);
+  const runs = jobData?.runs || [];
 
   const results = analysisData?.results || [];
   const company = companyData || {};
@@ -179,6 +181,92 @@ export default function CompanyDetail({ ticker, onBack }) {
             </div>
           )}
         </div>
+      </div>
+
+      {/* Recent Analysis Runs */}
+      <div style={{ marginTop: 'var(--space-xl)' }}>
+        <div className="section__header">
+          <h2 className="section__title">🔄 Recent Analysis Runs</h2>
+        </div>
+        {jobsLoading ? (
+          <div className="loading-container">
+            <div className="spinner" />
+            <span style={{ color: 'var(--text-muted)' }}>Loading run history...</span>
+          </div>
+        ) : runs.length === 0 ? (
+          <div className="card">
+            <div className="empty-state">
+              <div className="empty-state__icon">📋</div>
+              <p>No analysis runs yet for {ticker}</p>
+              <p style={{ fontSize: '0.813rem', marginTop: 'var(--space-sm)', color: 'var(--text-muted)' }}>
+                Click "Run Analysis" above to start
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Run ID</th>
+                  <th>Status</th>
+                  <th>Started</th>
+                  <th>Completed</th>
+                  <th style={{ textAlign: 'center' }}>Documents</th>
+                  <th>Triggered By</th>
+                </tr>
+              </thead>
+              <tbody>
+                {runs.map((run, i) => (
+                  <tr key={run.run_id || i} className="animate-in" style={{
+                    animationDelay: `${Math.min(i * 0.03, 0.3)}s`,
+                  }}>
+                    <td>
+                      <span className="mono" style={{ color: 'var(--accent-blue)', fontSize: '0.813rem' }}>
+                        {run.run_id || '—'}
+                      </span>
+                    </td>
+                    <td>
+                      <span className="pill" style={{
+                        background: run.status === 'COMPLETED'
+                          ? 'var(--positive-bg)' : run.status === 'FAILED'
+                          ? 'var(--negative-bg)' : 'var(--neutral-bg)',
+                        color: run.status === 'COMPLETED'
+                          ? 'var(--positive)' : run.status === 'FAILED'
+                          ? 'var(--negative)' : 'var(--neutral)',
+                        border: `1px solid ${run.status === 'COMPLETED'
+                          ? 'var(--positive-border)' : run.status === 'FAILED'
+                          ? 'var(--negative-border)' : 'var(--neutral-border)'}`,
+                      }}>
+                        {run.status || 'UNKNOWN'}
+                      </span>
+                    </td>
+                    <td style={{ fontSize: '0.813rem' }}>
+                      {run.started_at
+                        ? new Date(run.started_at).toLocaleString('en-US', {
+                            month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+                          })
+                        : '—'}
+                    </td>
+                    <td style={{ fontSize: '0.813rem' }}>
+                      {run.completed_at
+                        ? new Date(run.completed_at).toLocaleString('en-US', {
+                            month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+                          })
+                        : '—'}
+                    </td>
+                    <td className="mono" style={{ textAlign: 'center' }}>
+                      {run.documents_scraped || 0}
+                    </td>
+                    <td style={{ fontSize: '0.813rem', color: 'var(--text-muted)' }}>
+                      {run.triggered_by || 'scheduled'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

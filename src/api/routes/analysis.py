@@ -29,7 +29,7 @@ def _get_dynamo():
 def get_analysis(
     ticker: str,
     source: Optional[str] = Query(None, description="Filter by source: SEC, INVESTOR_PAGE, NEWS_PAGE, REDDIT, X"),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(50, ge=1, le=500),
 ) -> dict[str, Any]:
     """Get all analysis findings for a company, optionally filtered by source."""
     dynamo = _get_dynamo()

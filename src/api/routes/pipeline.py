@@ -255,7 +255,7 @@ def _run_local_pipeline(companies: list[dict], triggered_by: str, run_id: str) -
             provider_name, model_id = _MODEL_MAP.get(primary_provider, ("gemini", "gemini-2.5-flash"))
             jlog.info(Stage.SENTIMENT, f"LLM analysis using {provider_name}/{model_id}",
                       provider=provider_name, model=model_id,
-                      fallback_chain=["openai/gpt-4o-mini", "anthropic/claude-3-5-haiku-latest"])
+                      fallback_chain=["openai/gpt-4o-mini", "anthropic/claude-haiku-4-5-20251001"])
 
             # Collect ALL documents for these tickers (not just new ones)
             file_storage = create_file_storage()

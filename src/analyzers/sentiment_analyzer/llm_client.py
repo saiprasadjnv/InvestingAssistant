@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from typing import Any
 
@@ -34,7 +35,7 @@ _MODEL_MAP: dict[str, tuple[str, str]] = {
     # provider_key -> (provider_name, model_id)
     "gemini": ("gemini", "gemini-2.5-flash"),
     "openai": ("openai", "gpt-4o-mini"),
-    "anthropic": ("anthropic", "claude-3-5-haiku-latest"),
+    "anthropic": ("anthropic", "claude-haiku-4-5-20251001"),
 }
 
 # Maximum retry attempts per provider
@@ -201,7 +202,23 @@ class LLMClient:
                 return await call_fn(prompt, system_prompt, max_tokens)
             except Exception as exc:
                 last_exc = exc
+                exc_str = str(exc)
+
+                # Smart delay: if the error has a suggested retry delay, use it
                 delay = _BASE_DELAY_S * (2 ** attempt)
+                retry_match = re.search(r'retry\s+in\s+([\d.]+)s', exc_str, re.IGNORECASE)
+                if retry_match:
+                    suggested = float(retry_match.group(1))
+                    delay = min(suggested + 2, 60)  # Cap at 60s, add 2s buffer
+
+                # If it's a quota error (not rate limit), skip retries for this provider
+                if 'insufficient_quota' in exc_str or 'billing' in exc_str.lower():
+                    logger.warning(
+                        "Provider %s has quota/billing issue, skipping retries: %s",
+                        provider_key, exc_str[:200],
+                    )
+                    break
+
                 logger.warning(
                     "Attempt %d/%d for %s failed (%s), retrying in %.1fs",
                     attempt + 1,
@@ -314,7 +331,7 @@ class LLMClient:
         start = time.perf_counter()
         response = await asyncio.to_thread(
             self._anthropic_client.messages.create,
-            model="claude-3-5-haiku-latest",
+            model="claude-haiku-4-5-20251001",
             max_tokens=max_tokens,
             temperature=0.2,
             system=system_prompt,

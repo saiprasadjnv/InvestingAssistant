@@ -24,13 +24,49 @@ const SOURCE_LABELS = {
   X: 'X / Twitter',
 };
 
+/* Helper: compute outlook aggregation for a time horizon */
+function computeOutlook(results, horizon) {
+  const now = Date.now();
+  const msMap = { 'Today': 86400000, 'This Week': 604800000, 'This Month': 2592000000, 'This Year': 31536000000 };
+  const cutoff = now - (msMap[horizon] || msMap['This Year']);
+  const filtered = results.filter(r => r.created_at && new Date(r.created_at).getTime() >= cutoff);
+  if (filtered.length === 0) return null;
+
+  let positiveCount = 0, negativeCount = 0, neutralCount = 0, totalImpact = 0;
+  const factorMap = {};
+
+  filtered.forEach(r => {
+    const s = (r.sentiment || '').toUpperCase();
+    if (s === 'POSITIVE') positiveCount++;
+    else if (s === 'NEGATIVE') negativeCount++;
+    else neutralCount++;
+    totalImpact += (r.impact_score || 0);
+    (r.key_factors || []).forEach(f => { factorMap[f] = (factorMap[f] || 0) + 1; });
+  });
+
+  const topFactors = Object.entries(factorMap)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([f]) => f);
+
+  const avgImpact = Math.round((totalImpact / filtered.length) * 10) / 10;
+  const dominant = positiveCount >= negativeCount && positiveCount >= neutralCount
+    ? 'POSITIVE' : negativeCount >= positiveCount && negativeCount >= neutralCount
+    ? 'NEGATIVE' : 'MIXED';
+
+  return { positiveCount, negativeCount, neutralCount, avgImpact, topFactors, totalCount: filtered.length, dominant };
+}
+
 export default function CompanyDetail({ ticker, onBack }) {
   const { data: companyData, loading: compLoading } = useCompanyDetail(ticker);
   const [activeSource, setActiveSource] = useState('ALL');
+  const [outlookTab, setOutlookTab] = useState('This Month');
   const { data: analysisData, loading: analysisLoading } = useAnalysis(
     ticker,
     activeSource === 'ALL' ? null : activeSource
   );
+  const { data: allAnalysisData } = useAnalysis(ticker, null, 200);
+  const allResults = allAnalysisData?.results || [];
   const { runSingle, loading: pipelineLoading, error: pipelineError, result: pipelineResult } = useRunPipeline();
   const { data: jobData, loading: jobsLoading } = useJobRuns(10, ticker);
   const runs = jobData?.runs || [];
@@ -41,6 +77,7 @@ export default function CompanyDetail({ ticker, onBack }) {
 
   const results = analysisData?.results || [];
   const company = companyData || {};
+  const outlook = computeOutlook(allResults, outlookTab);
 
   return (
     <div className="company-detail animate-in">
@@ -123,6 +160,105 @@ export default function CompanyDetail({ ticker, onBack }) {
         </div>
       </div>
 
+      {/* Overall Company Outlook */}
+      <section style={{ marginBottom: 'var(--space-xl)' }}>
+        <div className="card">
+          <div className="card__header">
+            <span className="card__title">🔮 Overall Company Outlook</span>
+          </div>
+          <div style={{ display: 'flex', gap: '4px', padding: '0 var(--space-lg)', marginBottom: 'var(--space-lg)' }}>
+            {['Today', 'This Week', 'This Month', 'This Year'].map(tab => (
+              <button key={tab} onClick={() => setOutlookTab(tab)} style={{
+                padding: '8px 16px', borderRadius: '8px', border: 'none', cursor: 'pointer',
+                fontWeight: 600, fontSize: '0.813rem', transition: 'all 0.2s',
+                background: outlookTab === tab ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'var(--bg-input)',
+                color: outlookTab === tab ? 'white' : 'var(--text-muted)',
+              }}>
+                {tab}
+              </button>
+            ))}
+          </div>
+          <div style={{ padding: '0 var(--space-lg) var(--space-lg)' }}>
+            {!outlook ? (
+              <div style={{
+                textAlign: 'center', padding: 'var(--space-xl)', color: 'var(--text-muted)',
+                fontSize: '0.875rem',
+              }}>
+                📭 No analysis data available for this period
+              </div>
+            ) : (
+              <>
+                {/* Sentiment distribution bar */}
+                <div style={{ marginBottom: 'var(--space-lg)' }}>
+                  <div style={{ fontSize: '0.688rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '6px' }}>
+                    Sentiment Distribution
+                  </div>
+                  <div style={{ display: 'flex', height: '10px', borderRadius: '5px', overflow: 'hidden', background: 'var(--bg-input)' }}>
+                    {outlook.positiveCount > 0 && (
+                      <div style={{ width: `${(outlook.positiveCount / outlook.totalCount) * 100}%`, background: 'linear-gradient(90deg, #10b981, #34d399)', transition: 'width 0.5s ease' }} />
+                    )}
+                    {outlook.neutralCount > 0 && (
+                      <div style={{ width: `${(outlook.neutralCount / outlook.totalCount) * 100}%`, background: 'linear-gradient(90deg, #6b7280, #9ca3af)', transition: 'width 0.5s ease' }} />
+                    )}
+                    {outlook.negativeCount > 0 && (
+                      <div style={{ width: `${(outlook.negativeCount / outlook.totalCount) * 100}%`, background: 'linear-gradient(90deg, #ef4444, #f87171)', transition: 'width 0.5s ease' }} />
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', gap: 'var(--space-md)', marginTop: '6px', fontSize: '0.75rem' }}>
+                    <span style={{ color: '#10b981' }}>● Positive: {outlook.positiveCount}</span>
+                    <span style={{ color: '#9ca3af' }}>● Neutral: {outlook.neutralCount}</span>
+                    <span style={{ color: '#ef4444' }}>● Negative: {outlook.negativeCount}</span>
+                  </div>
+                </div>
+
+                {/* Impact score + Key factors row */}
+                <div style={{ display: 'flex', gap: 'var(--space-xl)', alignItems: 'flex-start', flexWrap: 'wrap', marginBottom: 'var(--space-lg)' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+                    <div style={{ fontSize: '0.688rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Avg Impact</div>
+                    <ConfidenceGauge score={outlook.avgImpact} size={56} strokeWidth={4} />
+                  </div>
+                  {outlook.topFactors.length > 0 && (
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: '0.688rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px' }}>Top Key Factors</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                        {outlook.topFactors.map((f, i) => (
+                          <span key={i} className="pill" style={{
+                            background: 'linear-gradient(135deg, rgba(99,102,241,0.12), rgba(139,92,246,0.12))',
+                            color: '#a78bfa',
+                            border: '1px solid rgba(139,92,246,0.25)',
+                            fontSize: '0.688rem',
+                          }}>
+                            {f}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Text summary */}
+                <div style={{
+                  background: 'linear-gradient(135deg, rgba(99,102,241,0.06), rgba(139,92,246,0.04))',
+                  border: '1px solid rgba(99,102,241,0.15)',
+                  borderRadius: '8px',
+                  padding: 'var(--space-md)',
+                  fontSize: '0.85rem',
+                  lineHeight: 1.6,
+                  color: 'var(--text-secondary)',
+                }}>
+                  Based on <strong style={{ color: 'var(--text-primary)' }}>{outlook.totalCount}</strong> analyses, sentiment is predominantly{' '}
+                  <strong style={{ color: outlook.dominant === 'POSITIVE' ? '#10b981' : outlook.dominant === 'NEGATIVE' ? '#ef4444' : '#8b5cf6' }}>
+                    {outlook.dominant}
+                  </strong>{' '}
+                  with an average impact score of <strong style={{ color: 'var(--text-primary)' }}>{outlook.avgImpact}</strong>.
+                  {outlook.topFactors.length > 0 && <> Key factors include: {outlook.topFactors.join(', ')}.</>}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </section>
+
       {/* Source filter sidebar + results */}
       <div className="company-detail__layout">
         {/* Source sidebar */}
@@ -150,9 +286,7 @@ export default function CompanyDetail({ ticker, onBack }) {
                 <span>{label}</span>
                 {key !== 'ALL' && !disabled && (
                   <span className="source-filter-btn__count">
-                    {(analysisData?.results || []).filter(
-                      r => key === 'ALL' || r.source === key
-                    ).length || 0}
+                    {allResults.filter(r => r.source === key).length}
                   </span>
                 )}
               </button>
@@ -435,7 +569,19 @@ function FindingCard({ result: r, index }) {
 
       {/* Summary */}
       <div className={`finding-card__summary ${expanded ? '' : 'finding-card__summary--truncated'}`}>
-        {r.summary || 'No summary available'}
+        {(!r.summary || r.summary === 'LLM response could not be parsed.') ? (
+          <div style={{
+            background: 'linear-gradient(135deg, rgba(245,158,11,0.08), rgba(251,191,36,0.06))',
+            border: '1px solid rgba(245,158,11,0.25)',
+            borderRadius: '6px',
+            padding: '8px 12px',
+            fontSize: '0.788rem',
+            color: '#d97706',
+            lineHeight: 1.5,
+          }}>
+            ⚠️ Analysis incomplete — LLM response could not be parsed. Re-run the analysis with valid API keys.
+          </div>
+        ) : r.summary}
       </div>
 
       {/* Key factors */}

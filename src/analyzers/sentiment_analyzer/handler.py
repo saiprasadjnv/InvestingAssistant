@@ -226,12 +226,21 @@ async def _process_document(
 
     # 4. Call LLM (deep model for complex filings)
     if _is_complex_filing(doc):
-        response_text, metrics = await llm.analyze_deep(prompt, SYSTEM_PROMPT)
+        response_text, metrics = await llm.analyze_deep(prompt, SYSTEM_PROMPT, max_tokens=1024)
     else:
-        response_text, metrics = await llm.analyze(prompt, SYSTEM_PROMPT)
+        response_text, metrics = await llm.analyze(prompt, SYSTEM_PROMPT, max_tokens=1024)
 
     # 5. Parse response
+    logger.info(
+        "Raw LLM response for %s (len=%d): %s",
+        doc.doc_id, len(response_text), response_text[:500],
+    )
     parsed = _parse_llm_response(response_text)
+    logger.info(
+        "Parsed result for %s: sentiment=%s summary_len=%d keys=%s",
+        doc.doc_id, parsed.get("sentiment"), len(parsed.get("summary", "")),
+        list(parsed.keys()),
+    )
 
     # 6. Build AnalysisResult
     result_id = _build_result_id(doc.ticker, doc.source)
@@ -259,11 +268,12 @@ async def _process_document(
     storage.mark_document_processed(doc.source, doc.doc_id, {"result_id": result_id})
 
     logger.info(
-        "Analysed doc %s → result %s (sentiment=%s, impact=%.2f)",
+        "Analysed doc %s → result %s (sentiment=%s, impact=%.2f, summary=%s)",
         doc.doc_id,
         result_id,
         result.sentiment.value,
         result.impact_score,
+        result.summary[:80] if result.summary else "<empty>",
     )
     return result_id, metrics
 

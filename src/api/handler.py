@@ -43,6 +43,34 @@ def health_check():
     return {"status": "ok", "version": "1.0.0"}
 
 
+@app.on_event("startup")
+def _cleanup_stale_jobs():
+    """Mark any RUNNING jobs as CANCELLED on startup.
+
+    When uvicorn restarts (e.g. --reload), background pipeline threads are
+    killed silently, leaving job records stuck in RUNNING forever.  This
+    cleanup runs once per process start to fix that.
+    """
+    import logging
+    _log = logging.getLogger(__name__)
+    try:
+        from src.shared.storage import create_dynamo_storage
+        dynamo = create_dynamo_storage()
+        runs = dynamo.get_recent_job_runs(limit=100)
+        stale = [r for r in runs if r.get("status") == "RUNNING"]
+        for job in stale:
+            run_id = job.get("run_id", "")
+            dynamo.update_job_run(run_id, {
+                "status": "CANCELLED",
+                "cancel_requested": True,
+            })
+            _log.info("Cleaned up stale RUNNING job: %s", run_id)
+        if stale:
+            _log.info("Marked %d stale jobs as CANCELLED on startup", len(stale))
+    except Exception as exc:
+        _log.warning("Failed to clean up stale jobs: %s", exc)
+
+
 @app.get("/api/health", tags=["Health"])
 def api_health_check():
     """API health check."""

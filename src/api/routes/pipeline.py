@@ -23,8 +23,7 @@ router = APIRouter()
 
 _dynamo = None
 
-# Registry of cancel events for running jobs
-_cancel_events: dict[str, threading.Event] = {}
+
 
 
 def _get_dynamo():
@@ -103,8 +102,7 @@ def _run_local_pipeline(companies: list[dict], triggered_by: str, run_id: str) -
     import threading
     import time
 
-    cancel_event = threading.Event()
-    _cancel_events[run_id] = cancel_event
+
 
     def _run():
         from src.shared.job_logger import JobLogger, Stage
@@ -121,12 +119,17 @@ def _run_local_pipeline(companies: list[dict], triggered_by: str, run_id: str) -
         all_s3_keys = []  # Collect S3 keys from all scraper stages
 
         def _check_cancelled():
-            if cancel_event.is_set():
-                jlog.warn(Stage.INIT, "Pipeline cancelled by user")
-                _update_job_status(run_id, "CANCELLED", [], total_docs)
-                jlog.flush()
-                _cancel_events.pop(run_id, None)
-                return True
+            """Check if cancellation was requested via storage flag."""
+            try:
+                runs = dynamo.get_recent_job_runs(limit=50)
+                job = next((r for r in runs if r.get("run_id") == run_id), None)
+                if job and job.get("cancel_requested"):
+                    jlog.warn(Stage.INIT, "Pipeline cancelled by user")
+                    _update_job_status(run_id, "CANCELLED", [], total_docs)
+                    jlog.flush()
+                    return True
+            except Exception:
+                pass
             return False
 
         if _check_cancelled(): return
@@ -242,18 +245,19 @@ def _run_local_pipeline(companies: list[dict], triggered_by: str, run_id: str) -
         analysis_errors = []
         t0 = time.time()
         try:
-            from src.analyzers.sentiment_analyzer.handler import handler as sentiment_handler
-            from src.analyzers.sentiment_analyzer.llm_client import _MODEL_MAP
+            from src.analyzers.sentiment_analyzer.handler import _process_document, _parse_llm_response
+            from src.analyzers.sentiment_analyzer.llm_client import LLMClient, _MODEL_MAP
+            from src.shared.storage import create_file_storage
+            from src.shared.models import DataSource as DS
 
             # Determine which LLM provider/model will be used
             primary_provider = "gemini"
             provider_name, model_id = _MODEL_MAP.get(primary_provider, ("gemini", "gemini-2.5-flash"))
             jlog.info(Stage.SENTIMENT, f"LLM analysis using {provider_name}/{model_id}",
-                      provider=provider_name, model=model_id, fallback_chain=["openai/gpt-4o-mini", "anthropic/claude-3-5-haiku-latest"])
+                      provider=provider_name, model=model_id,
+                      fallback_chain=["openai/gpt-4o-mini", "anthropic/claude-3-5-haiku-latest"])
 
             # Collect ALL documents for these tickers (not just new ones)
-            from src.shared.storage import create_file_storage
-            from src.shared.models import DataSource as DS
             file_storage = create_file_storage()
             all_docs_for_analysis = []
             for company in companies:
@@ -268,41 +272,70 @@ def _run_local_pipeline(companies: list[dict], triggered_by: str, run_id: str) -
             if not all_docs_for_analysis:
                 jlog.info(Stage.SENTIMENT, "No documents found for analysis")
             else:
-                jlog.info(Stage.SENTIMENT, f"Found {len(all_docs_for_analysis)} total documents, analyzing unprocessed ones")
-                ct = time.time()
-                try:
-                    result = sentiment_handler({"s3_keys": all_docs_for_analysis, "primary_provider": primary_provider}, None)
-                    processed = result.get("documents_processed", 0)
-                    skipped = result.get("documents_skipped", 0)
-                    llm_metrics = result.get("llm_metrics", [])
-                    result_errors = result.get("errors", [])
-                    result_ids = result.get("result_ids", [])
-                    elapsed = int((time.time() - ct) * 1000)
+                jlog.info(Stage.SENTIMENT, f"Found {len(all_docs_for_analysis)} documents to check",
+                          total_docs=len(all_docs_for_analysis))
 
-                    analysis_results = processed
+                # Initialize LLM client and process one-by-one with streaming logs
+                llm_client = LLMClient(primary_provider=primary_provider)
+                skipped = 0
 
-                    # Log per-document LLM details
-                    for m in llm_metrics:
+                for doc_idx, s3_key in enumerate(all_docs_for_analysis, 1):
+                    if _check_cancelled(): return
+
+                    try:
+                        doc = file_storage.download_document(s3_key)
+                        doc_label = f"{doc.ticker}/{doc.source.value}/{doc.doc_id[:12]}"
+
+                        # Check if already analyzed
+                        if dynamo.is_document_processed(doc.source, doc.doc_id):
+                            skipped += 1
+                            jlog.info(Stage.SENTIMENT,
+                                      f"[{doc_idx}/{len(all_docs_for_analysis)}] {doc_label} — already analyzed, skipping",
+                                      ticker=doc.ticker, doc_id=doc.doc_id)
+                            continue
+
                         jlog.info(Stage.SENTIMENT,
-                                  f"{m.get('provider', '?')}/{m.get('model', '?')} "
-                                  f"tokens_in={m.get('tokens_in', 0)} tokens_out={m.get('tokens_out', 0)} "
-                                  f"cost=${m.get('cost_usd', 0):.6f} latency={m.get('latency_ms', 0)}ms",
-                                  provider=m.get('provider'), model=m.get('model'),
-                                  tokens_in=m.get('tokens_in', 0), tokens_out=m.get('tokens_out', 0),
-                                  cost_usd=m.get('cost_usd', 0), latency_ms=m.get('latency_ms', 0))
+                                  f"[{doc_idx}/{len(all_docs_for_analysis)}] Analyzing {doc_label}...",
+                                  ticker=doc.ticker, source=doc.source.value, doc_id=doc.doc_id)
+                        jlog.flush()  # Flush so UI sees it immediately
 
-                    jlog.info(Stage.SENTIMENT,
-                              f"Analysis complete: {processed} analyzed, {skipped} skipped, {elapsed}ms",
-                              analyzed=processed, skipped=skipped, elapsed_ms=elapsed)
+                        ct = time.time()
+                        import asyncio
+                        result_id, metrics = asyncio.run(
+                            _process_document(doc, llm_client, dynamo)
+                        )
+                        elapsed = int((time.time() - ct) * 1000)
 
-                    if result_errors:
-                        for err in result_errors:
-                            jlog.warn(Stage.SENTIMENT, err)
-                            analysis_errors.append(err)
+                        if result_id and metrics:
+                            analysis_results += 1
+                            jlog.info(Stage.SENTIMENT,
+                                      f"[{doc_idx}/{len(all_docs_for_analysis)}] ✓ {doc_label} — "
+                                      f"{metrics.provider}/{metrics.model} "
+                                      f"tokens={metrics.tokens_in}→{metrics.tokens_out} "
+                                      f"cost=${metrics.cost_usd:.6f} {elapsed}ms",
+                                      ticker=doc.ticker, provider=metrics.provider,
+                                      model=metrics.model, tokens_in=metrics.tokens_in,
+                                      tokens_out=metrics.tokens_out, cost_usd=metrics.cost_usd,
+                                      latency_ms=elapsed, result_id=result_id)
+                        else:
+                            skipped += 1
+                            jlog.info(Stage.SENTIMENT,
+                                      f"[{doc_idx}/{len(all_docs_for_analysis)}] — {doc_label} skipped (no template/result)",
+                                      ticker=doc.ticker)
 
-                except Exception as exc:
-                    jlog.error(Stage.SENTIMENT, "Sentiment analysis failed", exc=exc)
-                    errors.append(f"Sentiment: {str(exc)}")
+                        jlog.flush()  # Flush after each doc so logs stream
+
+                    except Exception as exc:
+                        error_msg = f"Error analyzing {s3_key}: {exc}"
+                        jlog.error(Stage.SENTIMENT, error_msg, exc=exc)
+                        analysis_errors.append(error_msg)
+                        jlog.flush()
+
+                jlog.info(Stage.SENTIMENT,
+                          f"Analysis complete: {analysis_results} analyzed, {skipped} skipped, "
+                          f"{len(analysis_errors)} errors, {int((time.time() - t0) * 1000)}ms total",
+                          analyzed=analysis_results, skipped=skipped,
+                          errors_count=len(analysis_errors))
 
             jlog.stage_done(Stage.SENTIMENT, analysis_results, int((time.time() - t0) * 1000))
 
@@ -365,7 +398,6 @@ def _run_local_pipeline(companies: list[dict], triggered_by: str, run_id: str) -
         except Exception:
             pass
         jlog.flush()
-        _cancel_events.pop(run_id, None)
 
         logger.info("Local pipeline finished (run_id=%s) status=%s docs=%d logs=%d",
                     run_id, status, total_docs, len(jlog.entries))
@@ -394,23 +426,31 @@ def _update_job_status(run_id: str, status: str, errors: list[str] = None, docs_
 
 @router.post("/pipeline/cancel/{run_id}", response_model=RunResponse)
 def cancel_job(run_id: str, user: dict = Depends(get_current_user)):
-    """Cancel a running pipeline job."""
-    cancel_event = _cancel_events.get(run_id)
-    if not cancel_event:
-        # Check if the job exists at all
-        dynamo = _get_dynamo()
-        try:
-            runs = dynamo.get_recent_job_runs(limit=50)
-            job = next((r for r in runs if r.get("run_id") == run_id), None)
-            if job and job.get("status") != "RUNNING":
-                raise HTTPException(status_code=400, detail=f"Job {run_id} is not running (status: {job.get('status')})")
-        except HTTPException:
-            raise
-        except Exception:
-            pass
-        raise HTTPException(status_code=404, detail=f"No active job found with id {run_id}")
+    """Cancel a running pipeline job by setting a persistent flag in storage."""
+    dynamo = _get_dynamo()
 
-    cancel_event.set()
+    # Verify the job exists and is running
+    try:
+        runs = dynamo.get_recent_job_runs(limit=50)
+        job = next((r for r in runs if r.get("run_id") == run_id), None)
+    except Exception as exc:
+        logger.error("Failed to look up job %s: %s", run_id, exc)
+        raise HTTPException(status_code=500, detail="Failed to look up job")
+
+    if not job:
+        raise HTTPException(status_code=404, detail=f"No job found with id {run_id}")
+
+    if job.get("status") not in ("RUNNING", None):
+        raise HTTPException(status_code=400, detail=f"Job is not running (status: {job.get('status')})")
+
+    # Set the cancel flag in storage — the pipeline thread reads this
+    try:
+        dynamo.update_job_run(run_id, {"cancel_requested": True})
+    except Exception as exc:
+        logger.error("Failed to set cancel flag for %s: %s", run_id, exc)
+        raise HTTPException(status_code=500, detail="Failed to set cancel flag")
+
+    logger.info("Cancel flag set for job %s", run_id)
     return RunResponse(
         status="cancelling",
         message=f"Cancel signal sent to job {run_id}. It will stop after the current operation.",

@@ -368,6 +368,30 @@ class DynamoStorage:
             logger.error(f"Failed to get job runs: {e}")
             raise
 
+    def update_job_run(self, run_id: str, updates: dict) -> None:
+        """Update fields on a job run's SUMMARY item."""
+        if not updates:
+            return
+        expr_parts = []
+        expr_values = {}
+        expr_names = {}
+        for i, (key, value) in enumerate(updates.items()):
+            alias_name = f"#k{i}"
+            alias_value = f":v{i}"
+            expr_parts.append(f"{alias_name} = {alias_value}")
+            expr_names[alias_name] = key
+            expr_values[alias_value] = value
+        try:
+            self._job_runs_table.update_item(
+                Key={"PK": f"RUN#{run_id}", "SK": "SUMMARY"},
+                UpdateExpression="SET " + ", ".join(expr_parts),
+                ExpressionAttributeNames=expr_names,
+                ExpressionAttributeValues=_float_to_decimal(expr_values),
+            )
+        except ClientError as e:
+            logger.error(f"Failed to update job run {run_id}: {e}")
+            raise
+
     def put_job_logs(self, run_id: str, entries: list[dict]) -> None:
         """Store log entries for a job run as a separate item."""
         item = {
@@ -631,7 +655,7 @@ class LocalDynamoStorage:
             "total_cost_usd": metrics.total_cost_usd, "calls_by_provider": metrics.calls_by_provider,
             "errors": metrics.errors,
         }
-        items = [i for i in items if i.get("run_id") != metrics.run_id]
+        items = [i for i in items if not (i.get("run_id") == metrics.run_id and i.get("SK", "SUMMARY") == "SUMMARY")]
         items.append(item)
         self._save(self._job_runs_file, items)
 
@@ -664,6 +688,15 @@ class LocalDynamoStorage:
             if item.get("PK") == f"RUN#{run_id}" and item.get("SK") == "LOGS":
                 return item.get("entries", [])
         return []
+
+    def update_job_run(self, run_id: str, updates: dict) -> None:
+        """Update fields on a job run's SUMMARY item."""
+        items = self._load(self._job_runs_file)
+        for item in items:
+            if item.get("PK") == f"RUN#{run_id}" and item.get("SK", "SUMMARY") == "SUMMARY":
+                item.update(updates)
+                break
+        self._save(self._job_runs_file, items)
 
     # -- Per-user Company Lists ---------------------------------------------
 

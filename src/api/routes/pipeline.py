@@ -39,7 +39,6 @@ class RunResponse(BaseModel):
 def _trigger_pipeline(companies: list[dict], triggered_by: str) -> str:
     """
     Start the pipeline for the given companies.
-
     In AWS: starts a Step Functions execution.
     Locally: runs scrapers directly in a background thread.
     """
@@ -54,20 +53,14 @@ def _trigger_pipeline(companies: list[dict], triggered_by: str) -> str:
         status="RUNNING",
         companies_processed=len(companies),
     )
-    # Store extra metadata directly on the item
     try:
         dynamo = _get_dynamo()
         dynamo.put_job_run(job)
-        # Store tickers + triggered_by as additional metadata
-        dynamo._job_runs_table.update_item(
-            Key={"PK": f"RUN#{run_id}", "SK": "SUMMARY"},
-            UpdateExpression="SET triggered_by = :tb, tickers = :tk, trigger_type = :tt",
-            ExpressionAttributeValues={
-                ":tb": triggered_by,
-                ":tk": tickers,
-                ":tt": "manual",
-            },
-        )
+        dynamo.update_job_run(run_id, {
+            "triggered_by": triggered_by,
+            "tickers": tickers,
+            "trigger_type": "manual",
+        })
     except Exception as exc:
         logger.error("Failed to record job run: %s", exc)
 
@@ -111,64 +104,230 @@ def _run_local_pipeline(companies: list[dict], triggered_by: str, run_id: str) -
 
         dynamo = _get_dynamo()
         jlog = JobLogger(run_id, storage=dynamo)
+        tickers = [c.get('ticker', '?') for c in companies]
         jlog.info(Stage.INIT, f"Pipeline started for {len(companies)} companies",
-                  triggered_by=triggered_by, tickers=[c.get('ticker') for c in companies])
+                  triggered_by=triggered_by, tickers=tickers, mode="local")
 
         event = {"companies": companies, "triggered_by": triggered_by, "manual": True, "run_id": run_id}
-        docs_scraped = 0
+        total_docs = 0
         errors = []
+        all_s3_keys = []  # Collect S3 keys from all scraper stages
 
         # --- SEC Scraper ---
         jlog.stage_start(Stage.SEC_SCRAPER, len(companies))
+        sec_docs = 0
         t0 = time.time()
         try:
             from src.scrapers.sec_agent.handler import handler as sec_handler
+            jlog.info(Stage.SEC_SCRAPER, "SEC scraper module loaded successfully")
+
             for company in companies:
                 ticker = company.get('ticker', '?')
                 jlog.company_start(Stage.SEC_SCRAPER, ticker)
+                ct = time.time()
                 try:
-                    result = sec_handler({"companies": [company], **event}, None)
-                    found = len(result.get("s3_keys", []))
-                    docs_scraped += found
-                    jlog.company_done(Stage.SEC_SCRAPER, ticker, new_docs=found)
+                    result = sec_handler({"companies": [company]}, None)
+                    found = result.get("scraped_count", 0)
+                    new_keys = result.get("s3_keys", [])
+                    result_errors = result.get("errors", [])
+                    elapsed = int((time.time() - ct) * 1000)
+
+                    sec_docs += len(new_keys)
+                    all_s3_keys.extend(new_keys)
+                    jlog.company_done(Stage.SEC_SCRAPER, ticker,
+                                     docs_found=found, new_docs=len(new_keys))
+
+                    if new_keys:
+                        jlog.info(Stage.SEC_SCRAPER, f"{ticker}: uploaded {len(new_keys)} docs to storage",
+                                  ticker=ticker, s3_keys=new_keys, elapsed_ms=elapsed)
+                    elif found > 0:
+                        jlog.info(Stage.SEC_SCRAPER, f"{ticker}: {found} filings found but all already processed",
+                                  ticker=ticker, elapsed_ms=elapsed)
+                    else:
+                        jlog.info(Stage.SEC_SCRAPER, f"{ticker}: no filings of interest found",
+                                  ticker=ticker, elapsed_ms=elapsed)
+
+                    if result_errors:
+                        for err in result_errors:
+                            jlog.warn(Stage.SEC_SCRAPER, f"{ticker}: {err}", ticker=ticker)
+
                 except Exception as exc:
                     jlog.company_error(Stage.SEC_SCRAPER, ticker, exc)
-            jlog.stage_done(Stage.SEC_SCRAPER, docs_scraped, int((time.time() - t0) * 1000))
+
+            total_docs += sec_docs
+            jlog.stage_done(Stage.SEC_SCRAPER, sec_docs, int((time.time() - t0) * 1000))
+
         except Exception as exc:
             errors.append(f"SEC: {str(exc)}")
             jlog.error(Stage.SEC_SCRAPER, "SEC scraper import/init failed", exc=exc)
 
         # --- Company Info Scraper ---
-        info_docs = 0
         jlog.stage_start(Stage.COMPANY_INFO, len(companies))
+        info_docs = 0
         t0 = time.time()
         try:
             from src.scrapers.company_info_agent.handler import handler as info_handler
+            jlog.info(Stage.COMPANY_INFO, "Company info scraper module loaded successfully")
+
             for company in companies:
                 ticker = company.get('ticker', '?')
                 jlog.company_start(Stage.COMPANY_INFO, ticker)
+                ct = time.time()
                 try:
-                    result = info_handler({"companies": [company], **event}, None)
-                    found = len(result.get("s3_keys", []))
-                    info_docs += found
-                    jlog.company_done(Stage.COMPANY_INFO, ticker, new_docs=found)
+                    result = info_handler({"companies": [company]}, None)
+                    body = result.get("body", result)
+                    inv_scraped = body.get("investor_docs_scraped", 0)
+                    news_scraped = body.get("news_docs_scraped", 0)
+                    new_uploaded = body.get("new_documents_uploaded", 0)
+                    s3_keys = body.get("s3_keys", [])
+                    result_errors = body.get("errors", [])
+                    elapsed = int((time.time() - ct) * 1000)
+
+                    info_docs += len(s3_keys)
+                    all_s3_keys.extend(s3_keys)
+                    jlog.company_done(Stage.COMPANY_INFO, ticker,
+                                     docs_found=inv_scraped + news_scraped,
+                                     new_docs=new_uploaded)
+
+                    jlog.info(Stage.COMPANY_INFO,
+                              f"{ticker}: investor={inv_scraped} news={news_scraped} new={new_uploaded}",
+                              ticker=ticker, investor_docs=inv_scraped, news_docs=news_scraped,
+                              new_docs=new_uploaded, elapsed_ms=elapsed)
+
+                    if s3_keys:
+                        jlog.info(Stage.COMPANY_INFO, f"{ticker}: stored {len(s3_keys)} docs",
+                                  ticker=ticker, s3_keys=s3_keys)
+
+                    if result_errors:
+                        for err in result_errors:
+                            jlog.warn(Stage.COMPANY_INFO, f"{ticker}: {err}", ticker=ticker)
+
                 except Exception as exc:
                     jlog.company_error(Stage.COMPANY_INFO, ticker, exc)
-            docs_scraped += info_docs
+
+            total_docs += info_docs
             jlog.stage_done(Stage.COMPANY_INFO, info_docs, int((time.time() - t0) * 1000))
+
         except Exception as exc:
             errors.append(f"CompanyInfo: {str(exc)}")
             jlog.error(Stage.COMPANY_INFO, "Company info scraper import/init failed", exc=exc)
 
-        # Update the job run with final results
-        status = "FAILED" if errors and docs_scraped == 0 else "COMPLETED"
-        _update_job_status(run_id, status, errors, docs_scraped)
+        # --- Sentiment Analysis ---
+        jlog.stage_start(Stage.SENTIMENT, len(companies))
+        analysis_results = 0
+        analysis_errors = []
+        t0 = time.time()
+        try:
+            from src.analyzers.sentiment_analyzer.handler import handler as sentiment_handler
+            from src.analyzers.sentiment_analyzer.llm_client import _MODEL_MAP
 
-        # Final flush — writes COMPLETE entry
+            # Determine which LLM provider/model will be used
+            primary_provider = "gemini"
+            provider_name, model_id = _MODEL_MAP.get(primary_provider, ("gemini", "gemini-2.5-flash"))
+            jlog.info(Stage.SENTIMENT, f"LLM analysis using {provider_name}/{model_id}",
+                      provider=provider_name, model=model_id, fallback_chain=["openai/gpt-4o-mini", "anthropic/claude-3-5-haiku-latest"])
+
+            if not all_s3_keys:
+                jlog.info(Stage.SENTIMENT, "No scraped documents to analyze — skipping LLM analysis")
+            else:
+                jlog.info(Stage.SENTIMENT, f"Analyzing {len(all_s3_keys)} documents")
+                ct = time.time()
+                try:
+                    result = sentiment_handler({"s3_keys": all_s3_keys, "primary_provider": primary_provider}, None)
+                    processed = result.get("documents_processed", 0)
+                    skipped = result.get("documents_skipped", 0)
+                    llm_metrics = result.get("llm_metrics", [])
+                    result_errors = result.get("errors", [])
+                    result_ids = result.get("result_ids", [])
+                    elapsed = int((time.time() - ct) * 1000)
+
+                    analysis_results = processed
+
+                    # Log per-document LLM details
+                    for m in llm_metrics:
+                        jlog.info(Stage.SENTIMENT,
+                                  f"{m.get('provider', '?')}/{m.get('model', '?')} "
+                                  f"tokens_in={m.get('tokens_in', 0)} tokens_out={m.get('tokens_out', 0)} "
+                                  f"cost=${m.get('cost_usd', 0):.6f} latency={m.get('latency_ms', 0)}ms",
+                                  provider=m.get('provider'), model=m.get('model'),
+                                  tokens_in=m.get('tokens_in', 0), tokens_out=m.get('tokens_out', 0),
+                                  cost_usd=m.get('cost_usd', 0), latency_ms=m.get('latency_ms', 0))
+
+                    jlog.info(Stage.SENTIMENT,
+                              f"Analysis complete: {processed} analyzed, {skipped} skipped, {elapsed}ms",
+                              analyzed=processed, skipped=skipped, elapsed_ms=elapsed)
+
+                    if result_errors:
+                        for err in result_errors:
+                            jlog.warn(Stage.SENTIMENT, err)
+                            analysis_errors.append(err)
+
+                except Exception as exc:
+                    jlog.error(Stage.SENTIMENT, "Sentiment analysis failed", exc=exc)
+                    errors.append(f"Sentiment: {str(exc)}")
+
+            jlog.stage_done(Stage.SENTIMENT, analysis_results, int((time.time() - t0) * 1000))
+
+        except Exception as exc:
+            errors.append(f"Sentiment: {str(exc)}")
+            jlog.error(Stage.SENTIMENT, "Sentiment analyzer import/init failed", exc=exc)
+
+        # --- Impact Scoring ---
+        jlog.stage_start(Stage.IMPACT_SCORER, len(companies))
+        scored_count = 0
+        alerts_count = 0
+        t0 = time.time()
+        try:
+            from src.analyzers.impact_scorer.handler import handler as impact_handler
+            jlog.info(Stage.IMPACT_SCORER, "Impact scorer module loaded successfully")
+
+            tickers_for_scoring = [c.get('ticker', '?') for c in companies]
+            ct = time.time()
+            try:
+                result = impact_handler({"tickers": tickers_for_scoring}, None)
+                scored_count = result.get("scored_count", 0)
+                alerts_count = result.get("alerts_triggered", 0)
+                result_errors = result.get("errors", [])
+                elapsed = int((time.time() - ct) * 1000)
+
+                jlog.info(Stage.IMPACT_SCORER,
+                          f"Scored {scored_count} results, {alerts_count} alerts triggered",
+                          scored=scored_count, alerts=alerts_count, elapsed_ms=elapsed)
+
+                if result_errors:
+                    for err in result_errors:
+                        jlog.warn(Stage.IMPACT_SCORER, err)
+
+            except Exception as exc:
+                jlog.error(Stage.IMPACT_SCORER, "Impact scoring failed", exc=exc)
+                errors.append(f"ImpactScorer: {str(exc)}")
+
+            jlog.stage_done(Stage.IMPACT_SCORER, scored_count, int((time.time() - t0) * 1000))
+
+        except Exception as exc:
+            errors.append(f"ImpactScorer: {str(exc)}")
+            jlog.error(Stage.IMPACT_SCORER, "Impact scorer import/init failed", exc=exc)
+
+        # --- Final Summary ---
+        status = "FAILED" if errors and total_docs == 0 and analysis_results == 0 else "COMPLETED"
+        jlog.info(Stage.COMPLETE if status == "COMPLETED" else Stage.INIT,
+                  f"Pipeline {status.lower()}: {total_docs} scraped, {analysis_results} analyzed, {scored_count} scored, {len(errors)} errors",
+                  total_docs=total_docs, analyses=analysis_results, scored=scored_count,
+                  alerts=alerts_count, errors=errors)
+
+        _update_job_status(run_id, status, errors, total_docs)
+        # Also update analysis/scoring counts
+        try:
+            dynamo.update_job_run(run_id, {
+                "analyses_completed": analysis_results,
+                "documents_scraped": total_docs,
+            })
+        except Exception:
+            pass
         jlog.flush()
 
         logger.info("Local pipeline finished (run_id=%s) status=%s docs=%d logs=%d",
-                    run_id, status, docs_scraped, len(jlog.entries))
+                    run_id, status, total_docs, len(jlog.entries))
 
     thread = threading.Thread(target=_run, daemon=True)
     thread.start()
@@ -179,25 +338,15 @@ def _update_job_status(run_id: str, status: str, errors: list[str] = None, docs_
     """Update a job run's status in the database."""
     try:
         dynamo = _get_dynamo()
-        update_expr = "SET #st = :s, completed_at = :ca"
-        expr_values = {
-            ":s": status,
-            ":ca": datetime.now(timezone.utc).isoformat(),
+        updates = {
+            "status": status,
+            "completed_at": datetime.now(timezone.utc).isoformat(),
         }
-        expr_names = {"#st": "status"}
         if errors:
-            update_expr += ", errors = :e"
-            expr_values[":e"] = errors
+            updates["errors"] = errors
         if docs_scraped > 0:
-            update_expr += ", documents_scraped = :ds"
-            expr_values[":ds"] = docs_scraped
-
-        dynamo._job_runs_table.update_item(
-            Key={"PK": f"RUN#{run_id}", "SK": "SUMMARY"},
-            UpdateExpression=update_expr,
-            ExpressionAttributeValues=expr_values,
-            ExpressionAttributeNames=expr_names,
-        )
+            updates["documents_scraped"] = docs_scraped
+        dynamo.update_job_run(run_id, updates)
     except Exception as exc:
         logger.error("Failed to update job run %s: %s", run_id, exc)
 

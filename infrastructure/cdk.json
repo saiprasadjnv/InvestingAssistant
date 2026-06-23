@@ -17,6 +17,7 @@
     "@aws-cdk/core:checkSecretUsage": true,
     "@aws-cdk/core:target-partitions": ["aws"],
     "@aws-cdk-containers/ecs-service-extensions:enableDefaultLogDriver": true,
-    "@aws-cdk/core:stackRelativeExports": true
+    "@aws-cdk/core:stackRelativeExports": true,
+    "domain_name": "investassist.online"
   }
 }

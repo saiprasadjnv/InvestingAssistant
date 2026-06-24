@@ -179,23 +179,23 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     logger.info("Company Info Agent starting — run_id=%s", run_id)
 
-    # Load companies.
-    companies = load_companies()
-    if requested_tickers:
-        ticker_set = {t.upper() for t in requested_tickers}
-        companies = [c for c in companies if c.ticker.upper() in ticker_set]
-
-    if not companies:
-        logger.warning("No companies to process.")
-        return {
-            "statusCode": 200,
-            "run_id": run_id,
-            "body": {
-                "companies_processed": 0,
-                "new_documents_uploaded": 0,
-                "s3_keys": [],
-            },
-        }
+    # Accept companies from Step Functions event (preferred) or load from config
+    raw_companies = event.get("companies", [])
+    if raw_companies:
+        # Step Functions passes company dicts directly
+        companies = []
+        for raw in raw_companies:
+            try:
+                companies.append(Company(**raw) if isinstance(raw, dict) else raw)
+            except Exception:
+                logger.warning("Skipping invalid company: %s", raw)
+        logger.info("Using %d companies from event input.", len(companies))
+    else:
+        # Fallback: load from config, optionally filter by tickers
+        companies = load_companies()
+        if requested_tickers:
+            ticker_set = {t.upper() for t in requested_tickers}
+            companies = [c for c in companies if c.ticker.upper() in ticker_set]
 
     logger.info("Processing %d companies.", len(companies))
 

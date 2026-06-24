@@ -62,7 +62,18 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """
     logger.info("X agent handler invoked")
 
-    companies: list[Company] = load_companies()
+    # Accept companies from Step Functions event (preferred) or load from config
+    raw_companies = event.get("companies", [])
+    if raw_companies:
+        companies = []
+        for raw in raw_companies:
+            try:
+                companies.append(Company(**raw) if isinstance(raw, dict) else raw)
+            except Exception:
+                logger.warning("Skipping invalid company: %s", raw)
+        logger.info("Using %d companies from event input.", len(companies))
+    else:
+        companies = load_companies()
     x_client = XClient()
     s3 = create_file_storage()
     dynamo = create_dynamo_storage()

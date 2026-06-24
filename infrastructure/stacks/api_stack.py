@@ -130,6 +130,22 @@ class ApiStack(Stack):
                 )
             )
 
+        # Grant API Lambda permission to read CloudWatch logs from pipeline Lambdas
+        api_lambda.add_to_role_policy(
+            iam.PolicyStatement(
+                effect=iam.Effect.ALLOW,
+                actions=[
+                    "logs:FilterLogEvents",
+                    "logs:GetLogEvents",
+                    "logs:DescribeLogStreams",
+                ],
+                resources=[
+                    cdk.Fn.sub(
+                        "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/InvestingAssistant-*:*"
+                    )
+                ],
+            )
+        )
         # ---------------------------------------------------------------
         # API Gateway HTTP API
         # ---------------------------------------------------------------

@@ -1,9 +1,8 @@
 """
 Job run tracking API routes.
 
-Syncs Step Functions execution status in real-time:
-- Job status is checked against the actual SFN execution
-- Logs are read directly from SFN execution history (no DynamoDB storage)
+- Syncs Step Functions execution status in real-time
+- Streams logs from CloudWatch Lambda log groups (the actual scraper/analyzer logs)
 """
 
 from __future__ import annotations
@@ -11,7 +10,8 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import datetime, timezone
+import re
+from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
 
 import boto3
@@ -24,6 +24,27 @@ router = APIRouter()
 
 _dynamo = None
 _sfn_client = None
+_logs_client = None
+
+# Lambda log groups to read from
+LAMBDA_LOG_GROUPS = [
+    "/aws/lambda/InvestingAssistant-SECAgent",
+    "/aws/lambda/InvestingAssistant-CompanyInfoAgent",
+    "/aws/lambda/InvestingAssistant-RedditAgent",
+    "/aws/lambda/InvestingAssistant-XAgent",
+    "/aws/lambda/InvestingAssistant-SentimentAnalyzer",
+    "/aws/lambda/InvestingAssistant-ImpactScorer",
+]
+
+# Map log group to friendly stage name
+LOG_GROUP_STAGE = {
+    "SECAgent": "SEC",
+    "CompanyInfoAgent": "COMPANY",
+    "RedditAgent": "REDDIT",
+    "XAgent": "X",
+    "SentimentAnalyzer": "SENTIMENT",
+    "ImpactScorer": "IMPACT",
+}
 
 
 def _get_dynamo():
@@ -40,6 +61,13 @@ def _get_sfn_client():
     return _sfn_client
 
 
+def _get_logs_client():
+    global _logs_client
+    if _logs_client is None:
+        _logs_client = boto3.client("logs")
+    return _logs_client
+
+
 def _get_exec_arn(run_id: str) -> str | None:
     """Build execution ARN from run_id."""
     state_machine_arn = os.environ.get("STATE_MACHINE_ARN", "")
@@ -52,7 +80,6 @@ def _get_exec_arn(run_id: str) -> str | None:
 def _sync_job_status(run_id: str, run: dict) -> dict:
     """Check SFN execution and update job status in DynamoDB if changed."""
     exec_arn = _get_exec_arn(run_id)
-    logger.info("Syncing SFN status for %s (exec_arn=%s, current_status=%s)", run_id, exec_arn, run.get("status"))
     if not exec_arn or run.get("status") not in ("RUNNING",):
         return run
 
@@ -79,7 +106,6 @@ def _sync_job_status(run_id: str, run: dict) -> dict:
 
             updates = {"status": new_status, "completed_at": completed_at}
 
-            # Extract stats from output
             try:
                 output = json.loads(execution.get("output", "{}") or "{}")
                 updates["analyses_completed"] = output.get("scored_count", 0)
@@ -90,127 +116,129 @@ def _sync_job_status(run_id: str, run: dict) -> dict:
             run.update(updates)
 
     except Exception as exc:
-        logger.warning("SFN sync failed for %s: %s", run_id, exc, exc_info=True)
+        logger.warning("SFN sync failed for %s: %s", run_id, exc)
 
     return run
 
 
-def _get_sfn_logs(run_id: str) -> list[dict]:
-    """Read logs directly from Step Functions execution history. No DynamoDB."""
+def _get_execution_time_range(run_id: str) -> tuple[int, int] | None:
+    """Get the start/end timestamps (ms) of a Step Functions execution."""
     exec_arn = _get_exec_arn(run_id)
     if not exec_arn:
-        return []
+        return None
 
     try:
         sfn = _get_sfn_client()
-        history = sfn.get_execution_history(
-            executionArn=exec_arn,
-            maxResults=100,
-            reverseOrder=False,
-        )
+        execution = sfn.describe_execution(executionArn=exec_arn)
+        start_time = execution.get("startDate")
+        stop_time = execution.get("stopDate")
 
-        logs = []
-        for event in history.get("events", []):
-            entry = _event_to_log(event)
-            if entry:
-                entry["run_id"] = run_id
-                logs.append(entry)
+        if not start_time:
+            return None
 
-        return logs
+        # Convert to epoch milliseconds
+        start_ms = int(start_time.timestamp() * 1000) - 2000  # 2s before
+        if stop_time:
+            end_ms = int(stop_time.timestamp() * 1000) + 2000  # 2s after
+        else:
+            end_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+        return (start_ms, end_ms)
 
     except Exception as exc:
-        logger.warning("Failed to read SFN logs for %s: %s", run_id, exc, exc_info=True)
-        return []
-
-
-def _event_to_log(event: dict) -> dict | None:
-    """Convert a Step Functions event to a log entry."""
-    event_type = event.get("type", "")
-    ts = event.get("timestamp", datetime.now(timezone.utc))
-    ts_str = ts.isoformat() if isinstance(ts, datetime) else str(ts)
-
-    message = None
-    level = "INFO"
-
-    if event_type == "ExecutionStarted":
-        message = "🚀 Pipeline started"
-
-    elif event_type == "ParallelStateEntered":
-        message = "📊 Starting parallel scrapers (SEC, Company Info, Reddit, X)..."
-
-    elif event_type == "ParallelStateExited":
-        message = "📊 All scrapers finished"
-
-    elif event_type == "TaskStateEntered":
-        name = event.get("stateEnteredEventDetails", {}).get("name", "")
-        label = {
-            "RunSECAgent": "📄 SEC EDGAR scraper starting...",
-            "RunCompanyInfoAgent": "🏢 Company info scraper starting...",
-            "RunRedditAgent": "💬 Reddit scraper starting...",
-            "RunXAgent": "🐦 X/Twitter scraper starting...",
-            "RunSentimentAnalyzer": "🧠 Sentiment analysis starting...",
-            "RunImpactScorer": "📈 Impact scoring starting...",
-        }.get(name)
-        if label:
-            message = label
-
-    elif event_type == "TaskSucceeded":
-        output_str = event.get("taskSucceededEventDetails", {}).get("output", "{}")
-        try:
-            payload = json.loads(output_str).get("Payload", {})
-            if "s3_keys" in payload:
-                count = len(payload["s3_keys"])
-                message = f"✅ Scraper done — {count} documents uploaded to S3"
-            elif "body" in payload and isinstance(payload["body"], dict):
-                body = payload["body"]
-                count = body.get("new_documents_uploaded", 0)
-                companies = body.get("companies_processed", 0)
-                message = f"✅ Company info done — {count} docs from {companies} companies"
-            elif "result_ids" in payload:
-                processed = payload.get("documents_processed", 0)
-                skipped = payload.get("documents_skipped", 0)
-                errors = len(payload.get("errors", []))
-                message = f"🧠 Sentiment done — {processed} analyzed, {skipped} skipped, {errors} errors"
-            elif "scored_count" in payload:
-                scored = payload.get("scored_count", 0)
-                message = f"📈 Impact scoring done — {scored} results scored"
-            else:
-                message = "✅ Task completed"
-        except Exception:
-            message = "✅ Task completed"
-
-    elif event_type == "TaskFailed":
-        level = "ERROR"
-        cause = event.get("taskFailedEventDetails", {}).get("cause", "Unknown")
-        try:
-            err_msg = json.loads(cause).get("errorMessage", cause[:120])
-        except Exception:
-            err_msg = cause[:120]
-        message = f"❌ Task failed: {err_msg}"
-
-    elif event_type == "PassStateEntered":
-        name = event.get("stateEnteredEventDetails", {}).get("name", "")
-        if "Collect" in name:
-            message = "📋 Collecting documents for analysis..."
-        elif "Fallback" in name or "Error" in name:
-            level = "WARNING"
-            message = f"⚠️ {name.replace('ErrorFallback', ' scraper failed — continuing with others')}"
-
-    elif event_type == "ExecutionSucceeded":
-        message = "✅ Pipeline completed successfully"
-
-    elif event_type == "ExecutionFailed":
-        level = "ERROR"
-        message = "❌ Pipeline failed"
-
-    elif event_type == "ExecutionAborted":
-        level = "WARNING"
-        message = "🛑 Pipeline cancelled"
-
-    if not message:
+        logger.warning("Failed to get execution time range for %s: %s", run_id, exc)
         return None
 
-    return {"timestamp": ts_str, "stage": "PIPELINE", "level": level, "message": message}
+
+def _parse_cloudwatch_message(message: str, log_group: str) -> dict | None:
+    """Parse a CloudWatch log line into a structured log entry."""
+    # Skip Lambda platform messages
+    if message.startswith(("START ", "END ", "REPORT ", "INIT_START", "XRAY")):
+        return None
+
+    # Extract stage from log group
+    stage = "PIPELINE"
+    for key, val in LOG_GROUP_STAGE.items():
+        if key in log_group:
+            stage = val
+            break
+
+    # Parse structured Lambda log: [LEVEL] timestamp requestId message
+    # Format: [INFO] 2026-06-24T06:28:11.048Z requestId message
+    m = re.match(
+        r'\[(\w+)\]\s+(\S+)\s+\S+\s+(.*)',
+        message.strip(),
+    )
+    if m:
+        level = m.group(1).upper()
+        msg = m.group(3).strip()
+        # Skip noisy/internal messages
+        if not msg or msg.startswith("Found credentials"):
+            return None
+        return {"level": level, "stage": stage, "msg": msg}
+
+    # Also try: timestamp [LEVEL] name — message (from basicConfig)
+    m2 = re.match(
+        r'\S+\s+\[(\w+)\]\s+\S+\s+[—-]\s+(.*)',
+        message.strip(),
+    )
+    if m2:
+        level = m2.group(1).upper()
+        msg = m2.group(2).strip()
+        if not msg or msg.startswith("Found credentials"):
+            return None
+        return {"level": level, "stage": stage, "msg": msg}
+
+    # Plain text log line
+    msg = message.strip()
+    if not msg or len(msg) < 5:
+        return None
+    return {"level": "INFO", "stage": stage, "msg": msg}
+
+
+def _get_cloudwatch_logs(run_id: str) -> list[dict]:
+    """Read actual Lambda CloudWatch logs for the execution time window."""
+    time_range = _get_execution_time_range(run_id)
+    if not time_range:
+        return []
+
+    start_ms, end_ms = time_range
+    logs_client = _get_logs_client()
+    all_entries = []
+
+    for log_group in LAMBDA_LOG_GROUPS:
+        try:
+            # Filter log events from this log group in the time range
+            paginator = logs_client.get_paginator("filter_log_events")
+            for page in paginator.paginate(
+                logGroupName=log_group,
+                startTime=start_ms,
+                endTime=end_ms,
+                interleaved=True,
+                PaginationConfig={"MaxItems": 200},
+            ):
+                for event in page.get("events", []):
+                    parsed = _parse_cloudwatch_message(
+                        event.get("message", ""), log_group
+                    )
+                    if parsed:
+                        # Use CloudWatch timestamp (ms since epoch) → ISO string
+                        ts_ms = event.get("timestamp", start_ms)
+                        ts_dt = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
+                        parsed["ts"] = ts_dt.isoformat()
+                        parsed["run_id"] = run_id
+                        all_entries.append(parsed)
+
+        except logs_client.exceptions.ResourceNotFoundException:
+            # Log group doesn't exist yet
+            continue
+        except Exception as exc:
+            logger.debug("Failed to read logs from %s: %s", log_group, exc)
+            continue
+
+    # Sort by timestamp
+    all_entries.sort(key=lambda e: e.get("ts", ""))
+    return all_entries
 
 
 # ---------------------------------------------------------------
@@ -270,9 +298,9 @@ def get_job_run(run_id: str) -> dict[str, Any]:
 
 @router.get("/job-runs/{run_id}/logs")
 def get_job_run_logs(run_id: str) -> dict[str, Any]:
-    """Get log entries — reads directly from Step Functions execution history."""
-    # Try SFN first (real-time, no storage needed)
-    entries = _get_sfn_logs(run_id)
+    """Stream logs from CloudWatch Lambda log groups for this pipeline run."""
+    # Try CloudWatch logs (real Lambda output)
+    entries = _get_cloudwatch_logs(run_id)
 
     # Fallback to DynamoDB logs (for local pipeline runs)
     if not entries:

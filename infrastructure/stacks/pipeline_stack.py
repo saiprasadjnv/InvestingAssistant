@@ -155,6 +155,11 @@ class PipelineStack(Stack):
             retry_on_service_exceptions=True,
         )
         sec_task.add_retry(max_attempts=2, interval=Duration.seconds(30))
+        sec_task.add_catch(
+            handler=sfn.Pass(self, "SECErrorFallback", result=sfn.Result.from_object({"s3_keys": [], "errors": ["SEC agent failed"]})),
+            errors=["States.ALL"],
+            result_path="$",
+        )
 
         company_info_task = sfn_tasks.LambdaInvoke(
             self, "RunCompanyInfoAgent",
@@ -163,6 +168,11 @@ class PipelineStack(Stack):
             retry_on_service_exceptions=True,
         )
         company_info_task.add_retry(max_attempts=2, interval=Duration.seconds(30))
+        company_info_task.add_catch(
+            handler=sfn.Pass(self, "CompanyInfoErrorFallback", result=sfn.Result.from_object({"s3_keys": [], "body": {"s3_keys": []}, "errors": ["CompanyInfo agent failed"]})),
+            errors=["States.ALL"],
+            result_path="$",
+        )
 
         reddit_task = sfn_tasks.LambdaInvoke(
             self, "RunRedditAgent",
@@ -171,6 +181,11 @@ class PipelineStack(Stack):
             retry_on_service_exceptions=True,
         )
         reddit_task.add_retry(max_attempts=2, interval=Duration.seconds(30))
+        reddit_task.add_catch(
+            handler=sfn.Pass(self, "RedditErrorFallback", result=sfn.Result.from_object({"s3_keys": [], "errors": ["Reddit agent failed"]})),
+            errors=["States.ALL"],
+            result_path="$",
+        )
 
         x_task = sfn_tasks.LambdaInvoke(
             self, "RunXAgent",
@@ -179,8 +194,14 @@ class PipelineStack(Stack):
             retry_on_service_exceptions=True,
         )
         x_task.add_retry(max_attempts=2, interval=Duration.seconds(30))
+        x_task.add_catch(
+            handler=sfn.Pass(self, "XErrorFallback", result=sfn.Result.from_object({"s3_keys": [], "errors": ["X agent failed"]})),
+            errors=["States.ALL"],
+            result_path="$",
+        )
 
-        # Parallel scraping
+        # Parallel scraping — each branch has its own error handling
+        # so one failure doesn't kill the entire pipeline
         scrape_parallel = sfn.Parallel(
             self, "ScrapeAllSources",
             result_path="$.scrape_results",
@@ -189,13 +210,6 @@ class PipelineStack(Stack):
         scrape_parallel.branch(company_info_task)
         scrape_parallel.branch(reddit_task)
         scrape_parallel.branch(x_task)
-
-        # Add catch to continue on scraper failures
-        scrape_parallel.add_catch(
-            handler=sfn.Pass(self, "ScraperErrorHandler"),
-            errors=["States.ALL"],
-            result_path="$.scraper_error",
-        )
 
         # Collect S3 keys from scraper outputs
         collect_keys = sfn.Pass(

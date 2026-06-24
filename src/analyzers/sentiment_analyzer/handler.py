@@ -339,9 +339,31 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         Summary with ``result_ids``, ``documents_processed``, ``errors``,
         and ``llm_metrics``.
     """
-    logger.info("Sentiment Analyzer handler invoked with %d document(s)", len(event.get("s3_keys", [])))
-
+    # --- Extract S3 keys --------------------------------------------------
+    # The event can arrive in two formats:
+    #   1. Direct: {"s3_keys": ["key1", "key2", ...]}  (local runs)
+    #   2. Step Functions Parallel output:
+    #      {"scrape_results": [
+    #          {"s3_keys": [...]},          # SEC scraper
+    #          {"body": {"s3_keys": [...]}}, # Company info scraper
+    #          ...
+    #      ]}
     s3_keys: list[str] = event.get("s3_keys", [])
+
+    if not s3_keys and "scrape_results" in event:
+        # Flatten s3_keys from all scraper outputs in the Parallel result
+        for scraper_output in event["scrape_results"]:
+            if isinstance(scraper_output, dict):
+                # Direct s3_keys at top level
+                s3_keys.extend(scraper_output.get("s3_keys", []))
+                # Nested inside a "body" key (company_info_agent format)
+                body = scraper_output.get("body", {})
+                if isinstance(body, dict):
+                    s3_keys.extend(body.get("s3_keys", []))
+        logger.info("Extracted %d S3 keys from scrape_results", len(s3_keys))
+
+    logger.info("Sentiment Analyzer handler invoked with %d document(s)", len(s3_keys))
+
     if not s3_keys:
         logger.warning("No S3 keys provided; nothing to do.")
         return {

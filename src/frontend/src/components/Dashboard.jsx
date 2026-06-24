@@ -90,7 +90,7 @@ export default function Dashboard({ onSelectCompany, onNavigate }) {
           </button>
         </div>
         <div className="grid-4">
-          <div className="card stat-card--blue animate-in animate-in-delay-1">
+          <div className="card stat-card--blue animate-in animate-in-delay-1" onClick={() => document.getElementById('tracked-companies')?.scrollIntoView({ behavior: 'smooth' })} style={{ cursor: 'pointer' }}>
             <div className="card__header">
               <span className="card__title">Companies Tracked</span>
               <div className="stat-icon stat-icon--blue">🏢</div>
@@ -101,7 +101,7 @@ export default function Dashboard({ onSelectCompany, onNavigate }) {
             <div className="card__label">Active monitoring</div>
           </div>
 
-          <div className="card stat-card--purple animate-in animate-in-delay-2">
+          <div className="card stat-card--purple animate-in animate-in-delay-2" onClick={() => document.getElementById('tracked-companies')?.scrollIntoView({ behavior: 'smooth' })} style={{ cursor: 'pointer' }}>
             <div className="card__header">
               <span className="card__title">Total Analyses</span>
               <div className="stat-icon stat-icon--purple">📊</div>
@@ -167,7 +167,7 @@ export default function Dashboard({ onSelectCompany, onNavigate }) {
       </section>
 
       {/* Company Grid */}
-      <section className="section">
+      <section className="section" id="tracked-companies">
         <div className="section__header">
           <h2 className="section__title">🏢 Tracked Companies</h2>
           <button

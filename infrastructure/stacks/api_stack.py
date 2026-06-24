@@ -99,13 +99,25 @@ class ApiStack(Stack):
         job_runs_table.grant_read_write_data(api_lambda)
         raw_bucket.grant_read_write(api_lambda)
 
-        # Grant API Lambda permission to trigger the pipeline
+        # Grant API Lambda permission to trigger and monitor the pipeline
         if state_machine_arn:
+            # Execution ARN pattern: replace :stateMachine: with :execution: + wildcard
+            execution_arn = state_machine_arn.replace(":stateMachine:", ":execution:") + ":*"
             api_lambda.add_to_role_policy(
                 iam.PolicyStatement(
                     effect=iam.Effect.ALLOW,
                     actions=["states:StartExecution"],
                     resources=[state_machine_arn],
+                )
+            )
+            api_lambda.add_to_role_policy(
+                iam.PolicyStatement(
+                    effect=iam.Effect.ALLOW,
+                    actions=[
+                        "states:DescribeExecution",
+                        "states:GetExecutionHistory",
+                    ],
+                    resources=[execution_arn],
                 )
             )
 

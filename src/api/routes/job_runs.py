@@ -52,6 +52,7 @@ def _get_exec_arn(run_id: str) -> str | None:
 def _sync_job_status(run_id: str, run: dict) -> dict:
     """Check SFN execution and update job status in DynamoDB if changed."""
     exec_arn = _get_exec_arn(run_id)
+    logger.info("Syncing SFN status for %s (exec_arn=%s, current_status=%s)", run_id, exec_arn, run.get("status"))
     if not exec_arn or run.get("status") not in ("RUNNING",):
         return run
 
@@ -89,7 +90,7 @@ def _sync_job_status(run_id: str, run: dict) -> dict:
             run.update(updates)
 
     except Exception as exc:
-        logger.debug("SFN sync failed for %s: %s", run_id, exc)
+        logger.warning("SFN sync failed for %s: %s", run_id, exc, exc_info=True)
 
     return run
 
@@ -118,7 +119,7 @@ def _get_sfn_logs(run_id: str) -> list[dict]:
         return logs
 
     except Exception as exc:
-        logger.debug("Failed to read SFN logs for %s: %s", run_id, exc)
+        logger.warning("Failed to read SFN logs for %s: %s", run_id, exc, exc_info=True)
         return []
 
 

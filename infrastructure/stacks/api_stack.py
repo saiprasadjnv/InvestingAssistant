@@ -117,7 +117,16 @@ class ApiStack(Stack):
                         "states:DescribeExecution",
                         "states:GetExecutionHistory",
                     ],
-                    resources=[execution_arn],
+                    # state_machine_arn is a CDK token, so .replace() won't work.
+                    # Use Fn::Sub to construct: arn:aws:states:REGION:ACCOUNT:execution:NAME:*
+                    resources=[
+                        cdk.Fn.join("", [
+                            cdk.Fn.select(0, cdk.Fn.split(":stateMachine:", state_machine_arn)),
+                            ":execution:",
+                            cdk.Fn.select(1, cdk.Fn.split(":stateMachine:", state_machine_arn)),
+                            ":*",
+                        ])
+                    ],
                 )
             )
 

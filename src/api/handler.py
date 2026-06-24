@@ -4,6 +4,16 @@ Main API handler — FastAPI application served by Mangum on AWS Lambda.
 
 from __future__ import annotations
 
+import logging
+import os
+
+# Configure logging before any module imports — Lambda defaults root to WARNING
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO"),
+    format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+    force=True,
+)
+
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from mangum import Mangum

@@ -42,6 +42,7 @@ pipeline = PipelineStack(
     analysis_table=storage.analysis_table,
     processed_docs_table=storage.processed_docs_table,
     job_runs_table=storage.job_runs_table,
+    user_data_table=storage.user_data_table,
     env=env,
 )
 pipeline.add_dependency(storage)
@@ -53,6 +54,7 @@ api = ApiStack(
     analysis_table=storage.analysis_table,
     processed_docs_table=storage.processed_docs_table,
     job_runs_table=storage.job_runs_table,
+    user_data_table=storage.user_data_table,
     raw_bucket=storage.raw_bucket,
     state_machine_arn=pipeline.state_machine_arn,
     env=env,

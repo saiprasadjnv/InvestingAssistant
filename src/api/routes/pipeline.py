@@ -18,6 +18,8 @@ from src.api.auth import get_current_user
 from src.shared.models import JobRunMetrics
 from src.shared.storage import create_dynamo_storage
 
+from .helpers import get_user_companies_list
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -462,8 +464,7 @@ def cancel_job(run_id: str, user: dict = Depends(get_current_user)):
 def run_all_companies(user: dict = Depends(get_current_user)):
     """Trigger analysis for all companies the user is tracking."""
     username = user.get("sub", "")
-    dynamo = _get_dynamo()
-    companies = dynamo.get_user_companies(username)
+    companies = get_user_companies_list(username)
 
     if not companies:
         raise HTTPException(status_code=400, detail="No companies in your tracking list.")
@@ -481,8 +482,7 @@ def run_all_companies(user: dict = Depends(get_current_user)):
 def run_single_company(ticker: str, user: dict = Depends(get_current_user)):
     """Trigger analysis for a single company."""
     username = user.get("sub", "")
-    dynamo = _get_dynamo()
-    companies = dynamo.get_user_companies(username) or []
+    companies = get_user_companies_list(username)
 
     # Find the company by ticker
     company = next((c for c in companies if c["ticker"].upper() == ticker.upper()), None)

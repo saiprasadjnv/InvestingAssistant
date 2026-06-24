@@ -136,9 +136,28 @@ class StorageStack(Stack):
         )
 
         # ---------------------------------------------------------------
+        # DynamoDB — User Data (per-user preferences & tracked companies)
+        # ---------------------------------------------------------------
+        self.user_data_table = dynamodb.Table(
+            self,
+            "UserDataTable",
+            table_name="InvestingAssistant-UserData",
+            partition_key=dynamodb.Attribute(
+                name="PK", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="SK", type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            removal_policy=cdk.RemovalPolicy.RETAIN,
+            point_in_time_recovery=True,
+        )
+
+        # ---------------------------------------------------------------
         # Outputs
         # ---------------------------------------------------------------
         cdk.CfnOutput(self, "RawBucketName", value=self.raw_bucket.bucket_name)
         cdk.CfnOutput(self, "AnalysisTableName", value=self.analysis_table.table_name)
         cdk.CfnOutput(self, "ProcessedDocsTableName", value=self.processed_docs_table.table_name)
         cdk.CfnOutput(self, "JobRunsTableName", value=self.job_runs_table.table_name)
+        cdk.CfnOutput(self, "UserDataTableName", value=self.user_data_table.table_name)

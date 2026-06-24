@@ -306,13 +306,14 @@ def get_dynamodb_table_name(table_key: str) -> str:
     name for local development.
 
     Args:
-        table_key: One of 'analysis', 'processed_docs', 'job_runs'
+        table_key: One of 'analysis', 'processed_docs', 'job_runs', 'user_data'
     """
     # CDK sets these env vars with the actual table names
     env_var_map = {
         "analysis": "ANALYSIS_TABLE",
         "processed_docs": "PROCESSED_DOCS_TABLE",
         "job_runs": "JOB_RUNS_TABLE",
+        "user_data": "USER_DATA_TABLE",
     }
 
     if table_key not in env_var_map:
@@ -328,6 +329,7 @@ def get_dynamodb_table_name(table_key: str) -> str:
         "analysis": "InvestingAssistant-AnalysisResults",
         "processed_docs": "InvestingAssistant-ProcessedDocuments",
         "job_runs": "InvestingAssistant-JobRuns",
+        "user_data": "InvestingAssistant-UserData",
     }
     return table_map[table_key]
 

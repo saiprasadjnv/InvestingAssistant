@@ -31,6 +31,7 @@ class ApiStack(Stack):
         analysis_table: dynamodb.ITable,
         processed_docs_table: dynamodb.ITable,
         job_runs_table: dynamodb.ITable,
+        user_data_table: dynamodb.ITable,
         raw_bucket: s3.IBucket,
         state_machine_arn: str = "",
         **kwargs,
@@ -84,6 +85,7 @@ class ApiStack(Stack):
                 "ANALYSIS_TABLE": analysis_table.table_name,
                 "PROCESSED_DOCS_TABLE": processed_docs_table.table_name,
                 "JOB_RUNS_TABLE": job_runs_table.table_name,
+                "USER_DATA_TABLE": user_data_table.table_name,
                 "JWT_SECRET": jwt_secret,
                 "ADMIN_USERNAME": admin_username,
                 "ADMIN_PASSWORD": admin_password,
@@ -97,6 +99,7 @@ class ApiStack(Stack):
         analysis_table.grant_read_write_data(api_lambda)
         processed_docs_table.grant_read_write_data(api_lambda)
         job_runs_table.grant_read_write_data(api_lambda)
+        user_data_table.grant_read_write_data(api_lambda)
         raw_bucket.grant_read_write(api_lambda)
 
         # Grant API Lambda permission to trigger and monitor the pipeline

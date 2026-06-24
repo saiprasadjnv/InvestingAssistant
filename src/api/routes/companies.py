@@ -10,8 +10,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from src.api.auth import get_current_user
-from src.shared.config import load_companies
 from src.shared.storage import create_dynamo_storage
+
+from .helpers import get_user_companies_list
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -32,27 +33,6 @@ def _get_username(user: dict) -> str:
     return user.get("sub", "anonymous")
 
 
-def _get_user_companies_list(username: str) -> list[dict]:
-    """Get companies for a user, seeding from defaults if first time."""
-    dynamo = _get_dynamo()
-    companies = dynamo.get_user_companies(username)
-    if companies is None:
-        # First-time user — seed from default config
-        defaults = load_companies()
-        companies = [
-            {
-                "name": c.name,
-                "ticker": c.ticker,
-                "sector": c.sector,
-                "cik": c.cik,
-                "investor_page_url": c.investor_page_url,
-                "news_page_url": c.news_page_url,
-            }
-            for c in defaults
-        ]
-        dynamo.put_user_companies(username, companies)
-        logger.info("Seeded %d default companies for new user %s", len(companies), username)
-    return companies
 
 
 # --- Response models ---
@@ -88,7 +68,7 @@ class CompanyCreateRequest(BaseModel):
 def list_companies(user: dict = Depends(get_current_user)):
     """List the authenticated user's tracked companies."""
     username = _get_username(user)
-    companies = _get_user_companies_list(username)
+    companies = get_user_companies_list(username)
     return [CompanyResponse(**c) for c in companies]
 
 
@@ -96,7 +76,7 @@ def list_companies(user: dict = Depends(get_current_user)):
 def get_company(ticker: str, user: dict = Depends(get_current_user)):
     """Get company details with latest analysis summary."""
     username = _get_username(user)
-    companies = _get_user_companies_list(username)
+    companies = get_user_companies_list(username)
 
     company = next((c for c in companies if c["ticker"].upper() == ticker.upper()), None)
     if not company:
@@ -143,7 +123,7 @@ def create_company(body: CompanyCreateRequest, user: dict = Depends(get_current_
 
     try:
         # Ensure user has a list first (seeds defaults if needed)
-        _get_user_companies_list(username)
+        get_user_companies_list(username)
         dynamo.add_user_company(username, new_company)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
@@ -159,7 +139,7 @@ def delete_company(ticker: str, user: dict = Depends(get_current_user)):
 
     try:
         # Ensure user has a list first
-        _get_user_companies_list(username)
+        get_user_companies_list(username)
         dynamo.remove_user_company(username, ticker)
     except ValueError:
         raise HTTPException(status_code=404, detail=f"Company {ticker} not found")

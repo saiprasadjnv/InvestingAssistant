@@ -39,6 +39,7 @@ class PipelineStack(Stack):
         analysis_table: dynamodb.ITable,
         processed_docs_table: dynamodb.ITable,
         job_runs_table: dynamodb.ITable,
+        user_data_table: dynamodb.ITable,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -85,6 +86,7 @@ class PipelineStack(Stack):
             "ANALYSIS_TABLE": analysis_table.table_name,
             "PROCESSED_DOCS_TABLE": processed_docs_table.table_name,
             "JOB_RUNS_TABLE": job_runs_table.table_name,
+            "USER_DATA_TABLE": user_data_table.table_name,
             "SNS_ALERT_TOPIC_ARN": self.alert_topic.topic_arn,
         }
 
@@ -137,6 +139,7 @@ class PipelineStack(Stack):
             analysis_table.grant_read_write_data(fn)
             processed_docs_table.grant_read_write_data(fn)
             job_runs_table.grant_read_write_data(fn)
+            user_data_table.grant_read_write_data(fn)
             reddit_secret.grant_read(fn)
             x_secret.grant_read(fn)
             llm_secret.grant_read(fn)

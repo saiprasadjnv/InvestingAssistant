@@ -178,6 +178,7 @@ class DynamoStorage:
         self._analysis_table = self._resource.Table(get_dynamodb_table_name("analysis"))
         self._processed_table = self._resource.Table(get_dynamodb_table_name("processed_docs"))
         self._job_runs_table = self._resource.Table(get_dynamodb_table_name("job_runs"))
+        self._user_data_table = self._resource.Table(get_dynamodb_table_name("user_data"))
 
     # -- Analysis Results ---------------------------------------------------
 
@@ -430,7 +431,7 @@ class DynamoStorage:
     def get_user_companies(self, username: str) -> list[dict] | None:
         """Get the company list for a user from DynamoDB."""
         try:
-            response = self._processed_table.get_item(
+            response = self._user_data_table.get_item(
                 Key={"PK": f"USER#{username}", "SK": "COMPANIES"}
             )
             item = response.get("Item")
@@ -450,7 +451,7 @@ class DynamoStorage:
             "updated_at": _utcnow().isoformat(),
         }
         try:
-            self._processed_table.put_item(Item=_float_to_decimal(item))
+            self._user_data_table.put_item(Item=_float_to_decimal(item))
             logger.info("Saved %d companies for user %s", len(companies), username)
         except ClientError as e:
             logger.error("Failed to save user companies: %s", e)
@@ -477,7 +478,7 @@ class DynamoStorage:
     def get_user_credentials(self, username: str) -> dict | None:
         """Get stored credentials for a user. Returns None if user not registered."""
         try:
-            response = self._processed_table.get_item(
+            response = self._user_data_table.get_item(
                 Key={"PK": f"USER#{username}", "SK": "CREDENTIALS"}
             )
             item = response.get("Item")
@@ -499,7 +500,7 @@ class DynamoStorage:
             "created_at": _utcnow().isoformat(),
         }
         try:
-            self._processed_table.put_item(Item=_float_to_decimal(item))
+            self._user_data_table.put_item(Item=_float_to_decimal(item))
             logger.info("Stored credentials for user %s", username)
         except ClientError as e:
             logger.error("Failed to store user credentials: %s", e)

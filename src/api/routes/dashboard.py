@@ -10,8 +10,9 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, Query
 
 from src.api.auth import get_current_user
-from src.shared.config import load_companies
 from src.shared.storage import create_dynamo_storage
+
+from .helpers import get_user_companies_list
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -31,34 +32,13 @@ def _get_username(user: dict) -> str:
     return user.get("sub", "anonymous")
 
 
-def _get_user_companies_list(username: str) -> list[dict]:
-    """Get companies for a user, seeding from defaults if first time."""
-    dynamo = _get_dynamo()
-    companies = dynamo.get_user_companies(username)
-    if companies is None:
-        # First-time user — seed from default config
-        defaults = load_companies()
-        companies = [
-            {
-                "name": c.name,
-                "ticker": c.ticker,
-                "sector": c.sector,
-                "cik": c.cik,
-                "investor_page_url": c.investor_page_url,
-                "news_page_url": c.news_page_url,
-            }
-            for c in defaults
-        ]
-        dynamo.put_user_companies(username, companies)
-        logger.info("Seeded %d default companies for new user %s", len(companies), username)
-    return companies
 
 
 @router.get("/dashboard/summary")
 def get_dashboard_summary(user: dict = Depends(get_current_user)) -> dict[str, Any]:
     """Aggregated dashboard data: company count, sentiment distribution, averages."""
     username = _get_username(user)
-    companies = _get_user_companies_list(username)
+    companies = get_user_companies_list(username)
     dynamo = _get_dynamo()
 
     total_analyses = 0

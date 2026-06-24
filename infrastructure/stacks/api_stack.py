@@ -93,11 +93,11 @@ class ApiStack(Stack):
             tracing=_lambda.Tracing.ACTIVE,
         )
 
-        # Grant read permissions
-        analysis_table.grant_read_data(api_lambda)
+        # Grant read/write permissions (API creates job runs, stores analysis, writes S3)
+        analysis_table.grant_read_write_data(api_lambda)
         processed_docs_table.grant_read_write_data(api_lambda)
-        job_runs_table.grant_read_data(api_lambda)
-        raw_bucket.grant_read(api_lambda)
+        job_runs_table.grant_read_write_data(api_lambda)
+        raw_bucket.grant_read_write(api_lambda)
 
         # Grant API Lambda permission to trigger the pipeline
         if state_machine_arn:
